@@ -1,0 +1,31 @@
+{
+  "name": "docuvault-checklist",
+  "version": "1.0.0",
+  "description": "Angular Document Checklist with Google Drive Storage & Admin Review System",
+  "scripts": {
+    "predev": "node cleanup-ports.js",
+    "dev": "node run-dev.js",
+    "prestart": "node cleanup-ports.js",
+    "start": "node run-dev.js",
+    "frontend": "npm --prefix frontend start",
+    "backend": "npm --prefix backend start",
+    "server": "npm --prefix backend start",
+    "client": "npm --prefix frontend start",
+    "build": "npm --prefix frontend run build",
+    "install:frontend": "npm --prefix frontend install",
+    "install:backend": "npm --prefix backend install",
+    "postinstall": "npm --prefix frontend install && npm --prefix backend install"
+  },
+  "keywords": [
+    "angular",
+    "google-drive",
+    "checklist",
+    "document-verification",
+    "workflow"
+  ],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
