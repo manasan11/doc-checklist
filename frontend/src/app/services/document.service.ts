@@ -1,4 +1,4 @@
-import { Injectable, inject, signal } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, of } from 'rxjs';
 import { map, catchError } from 'rxjs/operators';
@@ -7,14 +7,23 @@ import { AuthService } from './auth.service';
 
 const API_URL = (typeof window !== 'undefined' && window.location.port === '4200') ? 'http://localhost:5000/api' : '/api';
 
-const STORAGE_KEY = 'docuvault_documents_v3';
-
 const INITIAL_DOCUMENTS: Array<{ id: number; name: string; description: string }> = [
-  { id: 1, name: "Identity Proof (Aadhaar / Passport / Voter ID)", description: "Government issued identity proof" },
-  { id: 2, name: "Address Proof (Utility Bill / Rent Agreement)", description: "Valid residential address verification" },
-  { id: 3, name: "Highest Degree / Academic Certificate", description: "Graduation or Post-Graduation degree certificate" },
-  { id: 4, name: "Curriculum Vitae / Resume", description: "Updated professional resume" },
-  { id: 5, name: "Bank Account Proof / Cancelled Cheque", description: "Bank passbook front page or cancelled cheque" }
+  { id: 1, name: "Photos", description: "Recent passport-size and profile photographs" },
+  { id: 2, name: "Intro Videos", description: "Short self-introduction video presentation" },
+  { id: 3, name: "10th", description: "Secondary School Certificate (10th Standard / Matriculation)" },
+  { id: 4, name: "Plus Two", description: "Higher Secondary Certificate (12th / Plus Two)" },
+  { id: 5, name: "Language Certificates", description: "Certified German / English language proficiency certificates" },
+  { id: 6, name: "Letter of Recommendation", description: "Official recommendation or reference letters" },
+  { id: 7, name: "Childcare Reference", description: "Verified childcare experience certificate and reference" },
+  { id: 8, name: "German CV", description: "Standard Europass / German format tabular CV (Lebenslauf)" },
+  { id: 9, name: "Motivation Letter", description: "Personal statement of motivation (Anschreiben)" },
+  { id: 10, name: "PCC", description: "Police Clearance Certificate (Criminal background check)" },
+  { id: 11, name: "Medical", description: "Medical fitness certificate and health examination report" },
+  { id: 12, name: "Aadhaar Card", description: "Uploaded Aadhaar Card" },
+  { id: 13, name: "PAN Card", description: "Uploaded PAN Card" },
+  { id: 14, name: "Resume", description: "Uploaded Resume" },
+  { id: 15, name: "Degree Certificate", description: "Uploaded Degree Certificate" },
+  { id: 16, name: "Special / Document : Test *", description: "Uploaded Special / Document : Test *" }
 ];
 
 function formatCurrentDateTime(): string {
@@ -33,7 +42,8 @@ function formatCurrentDateTime(): string {
 }
 
 function calculatePermissions(doc: Partial<DocumentItem>) {
-  const isUploaded = doc.uploadStatus !== 'Upload Pending' && (doc.currentVersion || 0) > 0;
+  const hasVersions = !!(doc.versions && doc.versions.length > 0);
+  const isUploaded = (doc.uploadStatus !== 'Upload Pending' && (doc.currentVersion || 0) > 0) || hasVersions;
   const isLocked = !!doc.isLocked;
   return {
     canUpload: !isLocked,
@@ -77,69 +87,136 @@ function createDefaultDocuments(): DocumentItem[] {
 export class DocumentService {
   private http = inject(HttpClient);
   private authService = inject(AuthService);
-  private inMemoryDocs: DocumentItem[] = [];
 
   constructor() {
-    this.inMemoryDocs = this.loadDocs();
-  }
-
-  private loadDocs(): DocumentItem[] {
+    // Purge legacy non-isolated global document caches
     if (typeof window !== 'undefined' && window.localStorage) {
       try {
         localStorage.removeItem('docuvault_documents_v1');
         localStorage.removeItem('docuvault_documents_v2');
+        localStorage.removeItem('docuvault_documents_v3');
+        localStorage.removeItem('docuvault_documents_v4');
+        localStorage.removeItem('docuvault_documents_v5');
+        localStorage.removeItem('docuvault_documents_v6');
       } catch (_) {}
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        try {
+    }
+  }
+
+  private getStorageKey(userId?: string): string {
+    const uid = userId || this.authService.currentUser()?.id || 'guest';
+    return `docuvault_docs_${uid}`;
+  }
+
+  loadDocs(userId?: string): DocumentItem[] {
+    const key = this.getStorageKey(userId);
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      try {
+        const stored = sessionStorage.getItem(key);
+        if (stored) {
           const parsed = JSON.parse(stored) as DocumentItem[];
           let modified = false;
           const cleaned = parsed.map(d => {
-            // Revert any doc that was auto-transitioned to Accepted without manual selection
-            if (d.uploadStatus === 'Accepted' && !(d as any).manuallyReviewed) {
-              d.uploadStatus = 'Uploaded';
-              d.approvalStatus = 'Pending';
-              modified = true;
+            if (d.versions && d.versions.length > 0) {
+              const vMap = new Map();
+              for (const v of d.versions) {
+                vMap.set(v.versionNumber, v);
+              }
+              const uniqueVers = Array.from(vMap.values());
+              if (uniqueVers.length !== d.versions.length) {
+                d.versions = uniqueVers;
+                modified = true;
+              }
+              const needsRenumbering = d.versions.some((v, idx) => v.versionNumber !== idx + 1);
+              if (needsRenumbering) {
+                d.versions.forEach((v, idx) => { v.versionNumber = idx + 1; });
+                d.currentVersion = d.versions.length;
+                modified = true;
+              }
+              if (d.uploadStatus === 'Upload Pending') {
+                d.uploadStatus = 'Uploaded';
+                modified = true;
+              }
+              if (!d.currentVersion || d.currentVersion < 1) {
+                d.currentVersion = d.versions.length;
+                modified = true;
+              }
             }
             return {
               ...d,
               permissions: calculatePermissions(d)
             };
           });
+
+          // Ensure all 16 documents exist
+          const list = [...cleaned];
+          INITIAL_DOCUMENTS.forEach(init => {
+            const match = list.find(d => d.id === init.id);
+            if (!match) {
+              list.push({
+                id: init.id,
+                name: init.name,
+                description: init.description,
+                uploadStatus: 'Upload Pending',
+                approvalStatus: 'Pending',
+                isLocked: false,
+                currentVersion: 0,
+                uploadDateTime: null,
+                driveFileId: null,
+                fileName: null,
+                fileSize: null,
+                mimeType: null,
+                webViewLink: null,
+                downloadUrl: null,
+                storageType: 'google_drive_cloud',
+                notes: '',
+                adminFeedback: '',
+                versions: [],
+                permissions: calculatePermissions({ uploadStatus: 'Upload Pending' })
+              });
+              modified = true;
+            } else {
+              if (match.name !== init.name || match.description !== init.description) {
+                match.name = init.name;
+                match.description = init.description;
+                modified = true;
+              }
+            }
+          });
+          list.sort((a, b) => a.id - b.id);
           if (modified) {
-            this.saveDocs(cleaned);
+            this.saveDocs(list, userId);
           }
-          return cleaned;
-        } catch {
-          // fallback to defaults if parse error
+          return list;
         }
-      }
+      } catch (_) {}
     }
     const defaults = createDefaultDocuments();
-    this.saveDocs(defaults);
+    this.saveDocs(defaults, userId);
     return defaults;
   }
 
-  private saveDocs(docs: DocumentItem[]): void {
-    this.inMemoryDocs = docs;
-    if (typeof window !== 'undefined' && window.localStorage) {
+  saveDocs(docs: DocumentItem[], userId?: string): void {
+    const key = this.getStorageKey(userId);
+    if (typeof window !== 'undefined' && window.sessionStorage) {
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(docs));
+        const json = JSON.stringify(docs);
+        sessionStorage.setItem(key, json);
       } catch (err) {
-        console.warn('LocalStorage save failed:', err);
+        console.warn('Document storage save failed:', err);
       }
     }
   }
 
   private getLocalChecklistResponse(userId?: string): ChecklistResponse {
-    const docs = this.loadDocs();
+    const targetUserId = userId || this.authService.currentUser()?.id || 'guest';
+    const docs = this.loadDocs(targetUserId);
     const uploadedCount = docs.filter(d => d.uploadStatus === 'Uploaded').length;
     const approvedCount = docs.filter(d => d.approvalStatus === 'Approved').length;
     const pendingCount = docs.filter(d => d.approvalStatus === 'Pending' && d.uploadStatus === 'Uploaded').length;
     const rejectedCount = docs.filter(d => d.approvalStatus === 'Rejected').length;
 
     return {
-      userId: userId || 'user_1',
+      userId: targetUserId,
       totalDocuments: docs.length,
       uploadedCount,
       approvedCount,
@@ -150,169 +227,96 @@ export class DocumentService {
   }
 
   getDocuments(userId?: string): Observable<ChecklistResponse> {
+    const targetUserId = userId || this.authService.currentUser()?.id;
     return this.http.get<ChecklistResponse>(`${API_URL}/documents`, {
       headers: this.authService.getAuthHeaders()
     }).pipe(
       map(res => {
         if (res && res.documents) {
-          const docs = res.documents.map(d => ({
-            ...d,
-            permissions: calculatePermissions(d)
-          }));
-          this.saveDocs(docs);
-          return { ...res, documents: docs };
+          const docs = res.documents.map(d => {
+            const init = INITIAL_DOCUMENTS.find(i => i.id === d.id);
+            if (init) {
+              d.name = d.name || init.name;
+              d.description = d.description || init.description;
+            }
+            if (d.versions && d.versions.length > 0) {
+              const needsRenumbering = d.versions.some((v, idx) => v.versionNumber !== idx + 1);
+              if (needsRenumbering) {
+                d.versions.forEach((v, idx) => { v.versionNumber = idx + 1; });
+                d.currentVersion = d.versions.length;
+              }
+            }
+            return {
+              ...d,
+              permissions: calculatePermissions(d)
+            };
+          });
+          docs.sort((a, b) => a.id - b.id);
+          this.saveDocs(docs, res.userId || targetUserId);
+          return { ...res, totalDocuments: docs.length, documents: docs };
         }
-        return this.getLocalChecklistResponse(userId);
+        return this.getLocalChecklistResponse(targetUserId);
       }),
-      catchError(() => of(this.getLocalChecklistResponse(userId)))
+      catchError(() => of(this.getLocalChecklistResponse(targetUserId)))
     );
   }
 
   getDocument(id: number): Observable<DocumentItem> {
-    const docs = this.loadDocs();
+    const targetUserId = this.authService.currentUser()?.id;
+    const docs = this.loadDocs(targetUserId);
     const doc = docs.find(d => d.id === id) || docs[0];
     return of(doc);
   }
 
-  uploadDocument(id: number, file: File, notes: string = ''): Observable<{ message: string; document: DocumentItem }> {
+  uploadDocument(id: number | null, file: File, notes: string = '', documentType?: string): Observable<{ message: string; document: DocumentItem; generatedFileName?: string }> {
+    const targetUserId = this.authService.currentUser()?.id;
     const formData = new FormData();
     formData.append('file', file);
     formData.append('notes', notes);
+    if (documentType) {
+      formData.append('documentType', documentType);
+    }
 
-    return this.http.post<{ message: string; document: DocumentItem }>(
-      `${API_URL}/documents/${id}/upload`,
+    const endpoint = id ? `${API_URL}/documents/${id}/upload` : `${API_URL}/documents/upload`;
+
+    return this.http.post<{ message: string; document: DocumentItem; generatedFileName?: string }>(
+      endpoint,
       formData,
       { headers: this.authService.getAuthHeaders() }
     ).pipe(
       map(res => {
-        const docs = this.loadDocs();
-        const docIdx = docs.findIndex(d => d.id === id);
-        if (docIdx !== -1 && res.document) {
+        const docs = this.loadDocs(targetUserId);
+        if (res.document) {
           res.document.permissions = calculatePermissions(res.document);
-          docs[docIdx] = res.document;
-          this.saveDocs(docs);
+          const docIdx = docs.findIndex(d => d.id === res.document.id);
+          if (docIdx !== -1) {
+            docs[docIdx] = res.document;
+          } else {
+            docs.push(res.document);
+          }
+          this.saveDocs(docs, targetUserId);
         }
         return res;
-      }),
-      catchError(err => {
-        console.warn('Backend API upload unreachable or error, falling back to local storage:', err);
-        const docs = this.loadDocs();
-        const doc = docs.find(d => d.id === id);
-        if (!doc) {
-          return of({ message: 'Document not found', document: docs[0] });
-        }
-
-        const newVersionNum = (doc.currentVersion || 0) + 1;
-        const nowFormatted = formatCurrentDateTime();
-        const objectUrl = URL.createObjectURL(file);
-
-        const newVersion: DocumentVersion = {
-          versionNumber: newVersionNum,
-          uploadDateTime: nowFormatted,
-          uploadTimestamp: new Date().toISOString(),
-          driveFileId: `local_${Date.now()}`,
-          fileName: file.name,
-          fileSize: file.size,
-          mimeType: file.type || 'application/octet-stream',
-          webViewLink: objectUrl,
-          downloadUrl: objectUrl,
-          storageType: 'Client Storage',
-          notes: notes,
-          approvalStatusAtUpload: 'Pending'
-        };
-
-        if (!doc.versions) {
-          doc.versions = [];
-        }
-        doc.versions.push(newVersion);
-        doc.uploadStatus = 'Uploaded';
-        (doc as any).manuallyReviewed = false;
-        doc.currentVersion = newVersionNum;
-        doc.uploadDateTime = nowFormatted;
-        doc.fileName = file.name;
-        doc.fileSize = file.size;
-        doc.mimeType = file.type || 'application/octet-stream';
-        doc.webViewLink = objectUrl;
-        doc.downloadUrl = objectUrl;
-        doc.notes = notes;
-        doc.permissions = calculatePermissions(doc);
-
-        this.saveDocs(docs);
-
-        return of({
-          message: `Document "${doc.name}" uploaded successfully`,
-          document: doc
-        });
       })
     );
   }
 
-
   deleteDocument(id: number, versionNumber?: number): Observable<{ message: string; document: DocumentItem }> {
+    const targetUserId = this.authService.currentUser()?.id;
     const url = `${API_URL}/documents/${id}${versionNumber ? '?version=' + versionNumber : ''}`;
+
     return this.http.delete<{ message: string; document: DocumentItem }>(url, {
       headers: this.authService.getAuthHeaders()
     }).pipe(
       map(res => {
-        const docs = this.loadDocs();
+        const docs = this.loadDocs(targetUserId);
         const docIdx = docs.findIndex(d => d.id === id);
-        if (docIdx !== -1 && res.document) {
+        if (docIdx !== -1 && res && res.document) {
           res.document.permissions = calculatePermissions(res.document);
           docs[docIdx] = res.document;
-          this.saveDocs(docs);
+          this.saveDocs(docs, targetUserId);
         }
         return res;
-      }),
-      catchError(err => {
-        console.warn('Backend delete error, falling back to local storage:', err);
-        const docs = this.loadDocs();
-        const doc = docs.find(d => d.id === id);
-        if (doc) {
-          if (versionNumber && doc.versions && doc.versions.length > 1) {
-            doc.versions = doc.versions.filter(v => v.versionNumber !== versionNumber);
-            const latestVer = doc.versions[doc.versions.length - 1];
-            doc.currentVersion = latestVer.versionNumber;
-            doc.fileName = latestVer.fileName;
-            doc.fileSize = latestVer.fileSize;
-            doc.mimeType = latestVer.mimeType;
-            doc.uploadDateTime = latestVer.uploadDateTime;
-            doc.webViewLink = latestVer.webViewLink;
-            doc.downloadUrl = latestVer.downloadUrl;
-            doc.notes = latestVer.notes || '';
-            doc.permissions = calculatePermissions(doc);
-            this.saveDocs(docs);
-            return of({
-              message: 'Document version deleted successfully',
-              document: doc
-            });
-          } else {
-            doc.uploadStatus = 'Upload Pending';
-            doc.approvalStatus = 'Pending';
-            (doc as any).manuallyReviewed = false;
-            doc.isLocked = false;
-            doc.currentVersion = 0;
-            doc.uploadDateTime = null;
-            doc.driveFileId = null;
-            doc.fileName = null;
-            doc.fileSize = null;
-            doc.mimeType = null;
-            doc.webViewLink = null;
-            doc.downloadUrl = null;
-            doc.notes = '';
-            doc.adminFeedback = '';
-            doc.versions = [];
-            doc.permissions = calculatePermissions(doc);
-            this.saveDocs(docs);
-            return of({
-              message: 'Document deleted successfully',
-              document: doc
-            });
-          }
-        }
-        return of({
-          message: 'Document not found',
-          document: docs[0]
-        });
       })
     );
   }
@@ -322,12 +326,47 @@ export class DocumentService {
       catchError(() => of({
         mode: 'emulated_google_drive' as const,
         configured: true,
-        folderId: '1R4O69oYqihfJOxXjYmLoJNKiUu_A6y0p',
-        folderUrl: 'https://drive.google.com/drive/folders/1R4O69oYqihfJOxXjYmLoJNKiUu_A6y0p',
+        folderId: '1suDPKDdeXmrBIIPG4W3FUnL4ZQbBqaNk',
+        folderUrl: 'https://drive.google.com/drive/folders/1suDPKDdeXmrBIIPG4W3FUnL4ZQbBqaNk',
         authMode: 'none' as const,
         hasServiceAccount: false,
         message: 'Operating with local persistent storage fallback'
       }))
+    );
+  }
+
+  getDriveFiles(folderId?: string): Observable<any> {
+    const url = folderId ? `${API_URL}/drive/files?folderId=${folderId}` : `${API_URL}/drive/files`;
+    return this.http.get<any>(url, {
+      headers: this.authService.getAuthHeaders()
+    }).pipe(
+      catchError(err => {
+        console.warn('Failed to fetch drive files:', err);
+        return of({ source: 'none', count: 0, files: [] });
+      })
+    );
+  }
+
+  syncDriveDocuments(userId?: string): Observable<any> {
+    const targetUserId = userId || this.authService.currentUser()?.id;
+    return this.http.post<any>(`${API_URL}/drive/sync`, { userId: targetUserId }, {
+      headers: this.authService.getAuthHeaders()
+    }).pipe(
+      map(res => {
+        if (res && res.documents) {
+          const docs = res.documents.map((d: any) => ({
+            ...d,
+            permissions: calculatePermissions(d)
+          }));
+          this.saveDocs(docs, res.userId || targetUserId);
+          return { ...res, documents: docs };
+        }
+        return res;
+      }),
+      catchError(err => {
+        console.warn('Drive sync API unreachable:', err);
+        return of({ message: 'Sync unavailable', syncedCount: 0 });
+      })
     );
   }
 }

@@ -12,14 +12,14 @@ import { DocumentItem } from '../../models/document.model';
       <div class="modal-content" (click)="$event.stopPropagation()">
         <div class="modal-header">
           <div>
-            <h3 class="modal-title">Upload Document</h3>
+            <h3 class="modal-title">{{ isReupload ? 'Re-upload' : 'Upload' }} Document</h3>
             <p class="modal-sub">{{ document.name }}</p>
           </div>
           <button class="btn btn-ghost btn-icon" (click)="close()">&times;</button>
         </div>
 
         <div class="modal-body">
-          <!-- Drag and Drop Area -->
+          <!-- Drag and Drop File Upload Area -->
           <div 
             class="dropzone" 
             [class.drag-over]="isDragOver()"
@@ -39,10 +39,21 @@ import { DocumentItem } from '../../models/document.model';
               <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
             </div>
             @if (selectedFile()) {
-              <div class="selected-file-card">
-                <span class="file-name">{{ selectedFile()?.name }}</span>
-                <span class="file-size font-mono">({{ formatBytes(selectedFile()?.size || 0) }})</span>
-                <button type="button" class="btn btn-ghost btn-sm" (click)="clearFile($event)">Remove</button>
+              <div class="selected-file-card" (click)="$event.stopPropagation()">
+                <div class="file-rename-block">
+                  <div class="rename-target-line">
+                    <span class="rename-badge">Target Filename:</span>
+                    <strong class="target-name font-mono">{{ targetFileNamePreview }}</strong>
+                  </div>
+                  <div class="rename-source-line">
+                    <span class="source-label">Original File:</span>
+                    <span class="source-name font-mono">{{ selectedFile()?.name }}</span>
+                    <span class="file-size font-mono">({{ formatBytes(selectedFile()?.size || 0) }})</span>
+                  </div>
+                </div>
+                <button type="button" class="btn btn-ghost btn-sm btn-remove-file" (click)="clearFile($event)" title="Choose another file">
+                  &times;
+                </button>
               </div>
             } @else {
               <div class="dropzone-text">
@@ -67,7 +78,7 @@ import { DocumentItem } from '../../models/document.model';
               <span class="spinner"></span> Uploading...
             } @else {
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
-              Upload
+              <span>Upload as {{ targetFileNamePreview || 'File' }}</span>
             }
           </button>
         </div>
@@ -77,9 +88,7 @@ import { DocumentItem } from '../../models/document.model';
   styles: [`
     .modal-badge { margin-bottom: 6px; }
     .modal-title { font-size: 1.35rem; font-weight: 700; color: #1C1917; margin-bottom: 2px; }
-    .modal-sub { font-size: 0.85rem; color: #78716C; }
-
-
+    .modal-sub { font-size: 0.88rem; color: #EA580C; font-weight: 600; margin: 0; }
 
     .dropzone {
       border: 2px dashed rgba(241, 90, 36, 0.35);
@@ -96,15 +105,15 @@ import { DocumentItem } from '../../models/document.model';
     }
 
     .dropzone-icon {
-      width: 52px;
-      height: 52px;
+      width: 48px;
+      height: 48px;
       border-radius: 50%;
       background: #FFF1EE;
       color: #F15A24;
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      margin-bottom: 12px;
+      margin-bottom: 10px;
     }
 
     .dropzone-text {
@@ -122,16 +131,67 @@ import { DocumentItem } from '../../models/document.model';
     .selected-file-card {
       display: flex;
       align-items: center;
-      justify-content: center;
-      gap: 10px;
+      justify-content: space-between;
+      gap: 12px;
       padding: 12px 16px;
       background: #FFF7ED;
       border: 1px solid #FED7AA;
       border-radius: var(--radius-md);
-      .file-name { font-size: 0.88rem; font-weight: 600; color: #C2410C; }
-      .file-size { font-size: 0.78rem; color: #78716C; }
+      cursor: default;
     }
 
+    .file-rename-block {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      text-align: left;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .rename-target-line {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .rename-badge {
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      background: #EA580C;
+      color: #FFFFFF;
+      padding: 2px 7px;
+      border-radius: 4px;
+    }
+
+    .target-name {
+      font-size: 0.95rem;
+      color: #9A3412;
+      font-weight: 700;
+      word-break: break-all;
+    }
+
+    .rename-source-line {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.76rem;
+      color: #78716C;
+      word-break: break-all;
+    }
+
+    .btn-remove-file {
+      font-size: 1.35rem;
+      line-height: 1;
+      color: #78716C;
+      padding: 4px 8px;
+      border-radius: 6px;
+      cursor: pointer;
+      &:hover { color: #DC2626; background: #FEE2E2; }
+    }
 
     .spinner {
       width: 14px;
@@ -148,7 +208,7 @@ import { DocumentItem } from '../../models/document.model';
 export class UploadModalComponent {
   @Input({ required: true }) document!: DocumentItem;
   @Input() uploading = signal<boolean>(false);
-  @Output() onUpload = new EventEmitter<{ file: File; notes: string }>();
+  @Output() onUpload = new EventEmitter<{ file: File; notes: string; documentType: string }>();
   @Output() onCancel = new EventEmitter<void>();
 
   selectedFile = signal<File | null>(null);
@@ -156,7 +216,21 @@ export class UploadModalComponent {
   notes = '';
 
   get isReupload(): boolean {
-    return this.document.uploadStatus === 'Uploaded';
+    return this.document?.uploadStatus === 'Uploaded';
+  }
+
+  get targetFileNamePreview(): string {
+    const file = this.selectedFile();
+    if (!file) return '';
+    const type = this.document?.name || 'Document';
+    const originalName = file.name || '';
+    const ext = originalName.includes('.') ? originalName.substring(originalName.lastIndexOf('.')) : '';
+    const cleanType = type
+      .replace(/[\/\\:*?"<>|]/g, '')
+      .replace(/\s+/g, '_')
+      .replace(/_+/g, '_')
+      .replace(/^[._-]+|[._-]+$/g, '');
+    return `${cleanType || 'Document'}${ext}`;
   }
 
   onFileSelected(event: Event) {
@@ -199,8 +273,9 @@ export class UploadModalComponent {
 
   submitUpload() {
     const file = this.selectedFile();
+    const docType = this.document?.name || 'Document';
     if (file) {
-      this.onUpload.emit({ file, notes: this.notes });
+      this.onUpload.emit({ file, notes: this.notes, documentType: docType });
     }
   }
 

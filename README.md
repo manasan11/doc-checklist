@@ -1,4 +1,4 @@
-# DocuVault - Angular Document Checklist & Google Drive Storage System
+# Ysquare - Angular Document Checklist & Google Drive Storage System
 
 A modern, full-stack enterprise document checklist and verification platform built with **Angular (v21)** and **Node.js/Express**, featuring direct **Google Drive cloud storage integration**, multi-version document tracking, granular permission matrices, and administrative review workflows.
 

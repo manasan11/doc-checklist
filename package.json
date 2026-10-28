@@ -1,5 +1,5 @@
 {
-  "name": "docuvault-checklist",
+  "name": "ysquare-checklist",
   "version": "1.0.0",
   "description": "Angular Document Checklist with Google Drive Storage & Admin Review System",
   "scripts": {
@@ -8,9 +8,13 @@
     "prestart": "node cleanup-ports.js",
     "start": "node run-dev.js",
     "frontend": "npm --prefix frontend start",
+    "prebackend": "node cleanup-ports.js",
     "backend": "npm --prefix backend start",
+    "preserver": "node cleanup-ports.js",
     "server": "npm --prefix backend start",
     "client": "npm --prefix frontend start",
+    "connect-drive": "node backend/setup-oauth.js",
+    "test:drive": "npm --prefix backend run test:drive",
     "build": "npm --prefix frontend run build",
     "install:frontend": "npm --prefix frontend install",
     "install:backend": "npm --prefix backend install",

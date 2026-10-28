@@ -7,6 +7,15 @@ import { AuthService } from '../../services/auth.service';
 import { NotificationService } from '../../services/notification.service';
 import { DocumentItem, ChecklistResponse } from '../../models/document.model';
 
+function getBackendUrl(path: string): string {
+  if (!path) return '';
+  if (path.startsWith('http://') || path.startsWith('https://')) return path;
+  const isDevPort = typeof window !== 'undefined' && window.location.port === '4200';
+  const base = isDevPort ? 'http://localhost:5000' : '';
+  const cleanPath = path.startsWith('/') ? path : '/' + path;
+  return `${base}${cleanPath}`;
+}
+
 @Component({
   selector: 'app-dashboard',
   standalone: true,
@@ -19,10 +28,21 @@ import { DocumentItem, ChecklistResponse } from '../../models/document.model';
     <main class="dashboard-container">
       <!-- Top Bar: Welcome User & Logout -->
       <header class="top-header">
-        <h1 class="welcome-title">
-          Welcome, <span class="user-highlight">{{ authService.currentUser()?.name }}</span>
-        </h1>
-        <button class="btn-logout" (click)="authService.logout()">Logout</button>
+        <div class="user-greeting-wrapper">
+          <h1 class="welcome-title">
+            Welcome, <span class="user-highlight">{{ authService.currentUser()?.name }}</span>
+          </h1>
+        </div>
+        <div class="header-actions">
+          <button class="btn-reset-password" (click)="openResetPasswordModal()" title="Reset account password">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+            </svg>
+            <span>Reset Password</span>
+          </button>
+          <button class="btn-logout" (click)="authService.logout()">Logout</button>
+        </div>
       </header>
 
       <!-- Main Document Checklist Card -->
@@ -37,7 +57,7 @@ import { DocumentItem, ChecklistResponse } from '../../models/document.model';
             <thead>
               <tr>
                 <th style="width: 50px;">No.</th>
-                <th>Document Name</th>
+                <th>Document</th>
                 <th>Upload Status</th>
                 <th>Upload / Re-upload</th>
                 <th>View Document</th>
@@ -48,8 +68,8 @@ import { DocumentItem, ChecklistResponse } from '../../models/document.model';
             <tbody>
               @for (doc of documents(); track doc.id) {
                 @if (doc.versions && doc.versions.length > 0) {
-                  @for (ver of doc.versions; track ver.versionNumber) {
-                    <tr [class.row-highlight]="selectedDoc()?.id === doc.id" [class.sub-version-row]="doc.versions.length > 1 && ver.versionNumber > 1">
+                  @for (ver of doc.versions; track ver.versionNumber; let isFirst = $first; let isLast = $last) {
+                    <tr [class.row-highlight]="selectedDoc()?.id === doc.id" [class.sub-version-row]="!isFirst">
                       <!-- 1. No. -->
                       <td class="col-no font-mono">
                         <span class="no-badge">#{{ doc.id }}</span>
@@ -57,7 +77,7 @@ import { DocumentItem, ChecklistResponse } from '../../models/document.model';
 
                       <!-- 2. Document Name -->
                       <td class="col-name">
-                        @if (ver.versionNumber === 1) {
+                        @if (isFirst) {
                           <div class="doc-info-block">
                             <div class="doc-primary-line">
                               <span class="doc-name-text">{{ doc.name }}</span>
@@ -75,7 +95,7 @@ import { DocumentItem, ChecklistResponse } from '../../models/document.model';
 
                       <!-- 3. Upload Status -->
                       <td class="col-upload-status">
-                        @if (ver.versionNumber === doc.currentVersion) {
+                        @if (isLast) {
                           <span 
                             class="badge" 
                             [ngClass]="getStatusBadgeClass(doc.uploadStatus)"
@@ -93,7 +113,7 @@ import { DocumentItem, ChecklistResponse } from '../../models/document.model';
 
                       <!-- 4. Upload / Re-upload Option -->
                       <td class="col-upload-action">
-                        @if (ver.versionNumber === doc.currentVersion && doc.permissions.canUpload) {
+                        @if (isLast && doc.permissions.canUpload) {
                           <button 
                             class="btn btn-sm btn-secondary"
                             (click)="openUploadModal(doc)"
@@ -101,7 +121,7 @@ import { DocumentItem, ChecklistResponse } from '../../models/document.model';
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
                             Re-upload
                           </button>
-                        } @else if (ver.versionNumber === doc.currentVersion && !doc.permissions.canUpload) {
+                        } @else if (isLast && !doc.permissions.canUpload) {
                           <button 
                             class="btn btn-secondary btn-sm" 
                             disabled 
@@ -248,6 +268,117 @@ import { DocumentItem, ChecklistResponse } from '../../models/document.model';
         </div>
       </div>
     }
+
+    <!-- Reset Password Modal -->
+    @if (activeModal() === 'reset-password') {
+      <div class="modal-overlay" (click)="closeModals()">
+        <div class="modal-content" style="max-width: 440px;" (click)="$event.stopPropagation()">
+          <div class="modal-header">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <div style="width: 36px; height: 36px; border-radius: 8px; background: rgba(241, 90, 36, 0.1); color: #F15A24; display: flex; align-items: center; justify-content: center;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                </svg>
+              </div>
+              <div>
+                <h3 class="modal-title" style="margin: 0; font-size: 1.1rem; font-weight: 700; color: #1C1917;">Reset Password</h3>
+                <p style="margin: 2px 0 0; font-size: 0.8rem; color: #78716C;">Create a new password for your account</p>
+              </div>
+            </div>
+            <button class="btn btn-ghost btn-icon" (click)="closeModals()" aria-label="Close dialog">&times;</button>
+          </div>
+
+          <form (ngSubmit)="submitResetPassword()">
+            <div class="modal-body" style="display: flex; flex-direction: column; gap: 16px;">
+              @if (resetPasswordError()) {
+                <div class="modal-error-alert">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="8" x2="12" y2="12"></line>
+                    <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                  </svg>
+                  <span>{{ resetPasswordError() }}</span>
+                </div>
+              }
+
+              <!-- New Password -->
+              <div class="form-group" style="margin: 0;">
+                <label class="form-label" for="modalNewPassword">New Password</label>
+                <div class="password-input-wrapper">
+                  <input 
+                    [type]="showNewPassword() ? 'text' : 'password'"
+                    id="modalNewPassword" 
+                    name="modalNewPassword" 
+                    [ngModel]="newPassword()"
+                    (ngModelChange)="newPassword.set($event); resetPasswordError.set('')"
+                    class="form-control" 
+                    placeholder="Enter at least 6 characters"
+                    required
+                    autocomplete="new-password"
+                  >
+                  <button 
+                    type="button" 
+                    class="password-toggle-btn" 
+                    (click)="showNewPassword.set(!showNewPassword())" 
+                    tabindex="-1"
+                    [attr.aria-label]="showNewPassword() ? 'Hide password' : 'Show password'"
+                  >
+                    @if (showNewPassword()) {
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
+                    } @else {
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                    }
+                  </button>
+                </div>
+              </div>
+
+              <!-- Confirm Password -->
+              <div class="form-group" style="margin: 0;">
+                <label class="form-label" for="modalConfirmPassword">Confirm Password</label>
+                <div class="password-input-wrapper">
+                  <input 
+                    [type]="showConfirmPassword() ? 'text' : 'password'"
+                    id="modalConfirmPassword" 
+                    name="modalConfirmPassword" 
+                    [ngModel]="confirmPassword()"
+                    (ngModelChange)="confirmPassword.set($event); resetPasswordError.set('')"
+                    class="form-control" 
+                    placeholder="Re-enter your new password"
+                    required
+                    autocomplete="new-password"
+                  >
+                  <button 
+                    type="button" 
+                    class="password-toggle-btn" 
+                    (click)="showConfirmPassword.set(!showConfirmPassword())" 
+                    tabindex="-1"
+                    [attr.aria-label]="showConfirmPassword() ? 'Hide password' : 'Show password'"
+                  >
+                    @if (showConfirmPassword()) {
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
+                    } @else {
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                    }
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="modal-footer">
+              <button type="button" class="btn btn-secondary" (click)="closeModals()" [disabled]="resetPasswordLoading()">Cancel</button>
+              <button type="submit" class="btn btn-primary-submit" [disabled]="resetPasswordLoading()">
+                @if (resetPasswordLoading()) {
+                  <span>Updating...</span>
+                } @else {
+                  <span>Update Password</span>
+                }
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    }
   `,
   styles: [`
     .dashboard-container {
@@ -272,6 +403,23 @@ import { DocumentItem, ChecklistResponse } from '../../models/document.model';
       box-shadow: 0 4px 16px -2px rgba(40, 20, 10, 0.05);
     }
 
+    .user-greeting-wrapper {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .user-email-pill {
+      font-size: 0.8rem;
+      background: #F4EFE6;
+      color: #78716C;
+      padding: 3px 10px;
+      border-radius: 20px;
+      border: 1px solid #E5DED3;
+      font-weight: 500;
+    }
+
     .welcome-title {
       font-size: 1.65rem;
       font-weight: 700;
@@ -285,6 +433,39 @@ import { DocumentItem, ChecklistResponse } from '../../models/document.model';
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       font-weight: 700;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .btn-reset-password {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      background: #FAF7F2;
+      border: 1px solid #E5DED3;
+      color: #44403C;
+      padding: 8px 16px;
+      border-radius: var(--radius-md);
+      font-size: 0.84rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .btn-reset-password:hover {
+      background: #FFF7ED;
+      border-color: #FDBA74;
+      color: #EA580C;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(241, 90, 36, 0.12);
+    }
+
+    .btn-reset-password svg {
+      color: #F15A24;
     }
 
     .btn-logout {
@@ -303,6 +484,81 @@ import { DocumentItem, ChecklistResponse } from '../../models/document.model';
       background: #FEF2F2;
       color: #DC2626;
       border-color: #FECACA;
+    }
+
+    .password-input-wrapper {
+      position: relative;
+      display: flex;
+      align-items: center;
+      width: 100%;
+    }
+
+    .password-input-wrapper .form-control {
+      padding-right: 44px;
+    }
+
+    .password-toggle-btn {
+      position: absolute;
+      right: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: none;
+      border: none;
+      padding: 6px;
+      margin: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: #78716C;
+      cursor: pointer;
+      border-radius: 6px;
+      transition: color 0.15s ease, background-color 0.15s ease;
+    }
+
+    .password-toggle-btn:hover {
+      color: #F15A24;
+      background: rgba(241, 90, 36, 0.08);
+    }
+
+    .modal-error-alert {
+      background: #FEF2F2;
+      border: 1px solid #FECACA;
+      border-radius: 8px;
+      padding: 10px 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #B91C1C;
+      font-size: 0.82rem;
+      line-height: 1.4;
+    }
+
+    .modal-error-alert svg {
+      flex-shrink: 0;
+      color: #DC2626;
+    }
+
+    .btn-primary-submit {
+      padding: 9px 18px;
+      background: linear-gradient(135deg, #E64323 0%, #F15A24 50%, #F97316 100%);
+      color: #ffffff;
+      border: none;
+      border-radius: var(--radius-md);
+      font-size: 0.88rem;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 3px 10px rgba(230, 67, 35, 0.28);
+      transition: all 0.2s;
+    }
+
+    .btn-primary-submit:hover:not(:disabled) {
+      box-shadow: 0 5px 16px rgba(230, 67, 35, 0.38);
+      transform: translateY(-1px);
+    }
+
+    .btn-primary-submit:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
     }
 
     /* Checklist Section */
@@ -329,6 +585,14 @@ import { DocumentItem, ChecklistResponse } from '../../models/document.model';
       color: #1C1917;
       letter-spacing: -0.02em;
     }
+
+    .checklist-subtitle {
+      font-size: 0.84rem;
+      color: #78716C;
+      margin: 4px 0 0 0;
+    }
+
+
 
     /* Table */
     .table-responsive {
@@ -479,9 +743,17 @@ export class DashboardComponent implements OnInit {
   documents = signal<DocumentItem[]>([]);
 
   // Modal controls
-  activeModal = signal<'upload' | 'delete' | null>(null);
+  activeModal = signal<'upload' | 'delete' | 'reset-password' | null>(null);
   selectedDoc = signal<DocumentItem | null>(null);
   selectedVersion = signal<number | undefined>(undefined);
+
+  // Reset Password State
+  newPassword = signal<string>('');
+  confirmPassword = signal<string>('');
+  showNewPassword = signal<boolean>(false);
+  showConfirmPassword = signal<boolean>(false);
+  resetPasswordError = signal<string>('');
+  resetPasswordLoading = signal<boolean>(false);
 
   uploadingInProgress = signal<boolean>(false);
 
@@ -549,9 +821,18 @@ export class DashboardComponent implements OnInit {
       ? doc.versions.find(v => v.versionNumber === versionNum)
       : (doc.versions && doc.versions.length > 0 ? doc.versions[doc.versions.length - 1] : undefined);
 
-    const viewUrl = targetVer?.webViewLink || doc.webViewLink;
-    if (viewUrl) {
-      window.open(viewUrl, '_blank');
+    const fileId = targetVer?.driveFileId || doc.driveFileId;
+    let targetPath = '';
+
+    if (fileId) {
+      targetPath = `/api/drive/files/${fileId}/view`;
+    } else if (targetVer?.webViewLink || doc.webViewLink) {
+      targetPath = targetVer?.webViewLink || doc.webViewLink || '';
+    }
+
+    if (targetPath) {
+      const fullUrl = getBackendUrl(targetPath);
+      window.open(fullUrl, '_blank');
     } else {
       this.notificationService.warning('Document Unavailable', 'No uploaded file found for this document.');
     }
@@ -563,22 +844,71 @@ export class DashboardComponent implements OnInit {
     this.activeModal.set('delete');
   }
 
+  openResetPasswordModal() {
+    this.newPassword.set('');
+    this.confirmPassword.set('');
+    this.showNewPassword.set(false);
+    this.showConfirmPassword.set(false);
+    this.resetPasswordError.set('');
+    this.resetPasswordLoading.set(false);
+    this.activeModal.set('reset-password');
+  }
+
+  submitResetPassword() {
+    const newPass = this.newPassword().trim();
+    const confirmPass = this.confirmPassword().trim();
+
+    if (!newPass) {
+      this.resetPasswordError.set('Please enter a new password.');
+      return;
+    }
+    if (newPass.length < 6) {
+      this.resetPasswordError.set('Password must be at least 6 characters long.');
+      return;
+    }
+    if (newPass !== confirmPass) {
+      this.resetPasswordError.set('Passwords do not match. Please re-enter.');
+      return;
+    }
+
+    this.resetPasswordError.set('');
+    this.resetPasswordLoading.set(true);
+
+    this.authService.changePassword(newPass, confirmPass).subscribe({
+      next: (res) => {
+        this.resetPasswordLoading.set(false);
+        this.closeModals();
+        this.notificationService.success('Password Updated', res.message || 'Your password has been reset successfully.');
+      },
+      error: (err) => {
+        this.resetPasswordLoading.set(false);
+        this.resetPasswordError.set(err.error?.error || 'Failed to update password. Please try again.');
+      }
+    });
+  }
+
   closeModals() {
     this.activeModal.set(null);
     this.selectedVersion.set(undefined);
+    this.resetPasswordError.set('');
+    this.resetPasswordLoading.set(false);
   }
 
-  handleUpload(event: { file: File; notes: string }) {
+
+
+  handleUpload(event: { file: File; notes: string; documentType?: string }) {
     const doc = this.selectedDoc();
     if (!doc) return;
 
     this.uploadingInProgress.set(true);
-    this.docService.uploadDocument(doc.id, event.file, event.notes).subscribe({
-      next: () => {
+    const docId = (doc.id && doc.id > 0) ? doc.id : null;
+    this.docService.uploadDocument(docId, event.file, event.notes, event.documentType).subscribe({
+      next: (res: any) => {
         this.uploadingInProgress.set(false);
+        const renamedName = res?.generatedFileName || (event.documentType ? `${event.documentType}.${event.file.name.split('.').pop()}` : event.file.name);
         this.notificationService.success(
-          'Uploaded to Google Drive',
-          `Document #${doc.id} uploaded successfully.`
+          'Upload Successful',
+          `Document saved as "${renamedName}" to checklist and Drive.`
         );
         this.closeModals();
         this.loadDocuments();

@@ -9,6 +9,10 @@ export const routes: Routes = [
     component: LoginComponent
   },
   {
+    path: 'reset-password',
+    component: LoginComponent
+  },
+  {
     path: 'dashboard',
     component: DashboardComponent,
     canActivate: [authGuard]

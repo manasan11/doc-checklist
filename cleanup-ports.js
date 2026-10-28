@@ -1,7 +1,8 @@
 const { execSync } = require('child_process');
 
 const isWindows = process.platform === 'win32';
-const ports = [5000, 4200];
+const requestedPorts = process.argv.slice(2).map(Number).filter(Boolean);
+const ports = requestedPorts.length > 0 ? requestedPorts : [5000];
 
 for (const port of ports) {
   try {

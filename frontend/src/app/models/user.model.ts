@@ -15,6 +15,17 @@ export interface AuthResponse {
 
 export interface ForgotPasswordResponse {
   message: string;
-  resetToken: string;
-  instructions: string;
+  resetToken?: string;
+  resetLink?: string;
+  email?: string;
+  liveEmailSent?: boolean;
+  instructions?: string;
 }
+
+export interface VerifyTokenResponse {
+  valid: boolean;
+  email?: string;
+  name?: string;
+  error?: string;
+}
+

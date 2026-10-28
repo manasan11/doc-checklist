@@ -2,7 +2,7 @@ const { spawn, execSync } = require('child_process');
 const path = require('path');
 
 console.log('=======================================================');
-console.log('       Starting DocuVault Fullstack System             ');
+console.log('       Starting Ysquare Fullstack System              ');
 console.log('       Backend:  http://localhost:5000                 ');
 console.log('       Frontend: http://localhost:4200                 ');
 console.log('=======================================================');
