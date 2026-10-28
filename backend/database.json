@@ -856,7 +856,7 @@
       "email": "manasansreedharan123@gmail.com",
       "username": "manu",
       "name": "Manu",
-      "password": "Password@123",
+      "password": "Password123",
       "role": "user",
       "department": "General Operations",
       "studentCode": "STU003",
@@ -866,7 +866,7 @@
         {
           "id": 1,
           "name": "Photos",
-          "description": "Uploaded Photos",
+          "description": "Recent passport-size and profile photographs",
           "uploadStatus": "Upload Pending",
           "approvalStatus": "Pending",
           "isLocked": false,
@@ -887,7 +887,7 @@
         {
           "id": 2,
           "name": "Intro Videos",
-          "description": "Uploaded Intro Videos",
+          "description": "Short self-introduction video presentation",
           "uploadStatus": "Upload Pending",
           "approvalStatus": "Pending",
           "isLocked": false,
@@ -908,7 +908,7 @@
         {
           "id": 3,
           "name": "10th",
-          "description": "Uploaded 10th",
+          "description": "Secondary School Certificate (10th Standard / Matriculation)",
           "uploadStatus": "Upload Pending",
           "approvalStatus": "Pending",
           "isLocked": false,
@@ -929,7 +929,7 @@
         {
           "id": 4,
           "name": "Plus Two",
-          "description": "Uploaded Plus Two",
+          "description": "Higher Secondary Certificate (12th / Plus Two)",
           "uploadStatus": "Upload Pending",
           "approvalStatus": "Pending",
           "isLocked": false,
@@ -950,7 +950,7 @@
         {
           "id": 5,
           "name": "Language Certificates",
-          "description": "Uploaded Language Certificates",
+          "description": "Certified German / English language proficiency certificates",
           "uploadStatus": "Upload Pending",
           "approvalStatus": "Pending",
           "isLocked": false,
@@ -971,7 +971,7 @@
         {
           "id": 6,
           "name": "Letter of Recommendation",
-          "description": "Uploaded Letter of Recommendation",
+          "description": "Official recommendation or reference letters",
           "uploadStatus": "Upload Pending",
           "approvalStatus": "Pending",
           "isLocked": false,
@@ -992,7 +992,7 @@
         {
           "id": 7,
           "name": "Childcare Reference",
-          "description": "Uploaded Childcare Reference",
+          "description": "Verified childcare experience certificate and reference",
           "uploadStatus": "Upload Pending",
           "approvalStatus": "Pending",
           "isLocked": false,
@@ -1013,7 +1013,7 @@
         {
           "id": 8,
           "name": "German CV",
-          "description": "Uploaded German CV",
+          "description": "Standard Europass / German format tabular CV (Lebenslauf)",
           "uploadStatus": "Upload Pending",
           "approvalStatus": "Pending",
           "isLocked": false,
@@ -1034,7 +1034,7 @@
         {
           "id": 9,
           "name": "Motivation Letter",
-          "description": "Uploaded Motivation Letter",
+          "description": "Personal statement of motivation (Anschreiben)",
           "uploadStatus": "Upload Pending",
           "approvalStatus": "Pending",
           "isLocked": false,
@@ -1055,7 +1055,7 @@
         {
           "id": 10,
           "name": "PCC",
-          "description": "Uploaded PCC",
+          "description": "Police Clearance Certificate (Criminal background check)",
           "uploadStatus": "Upload Pending",
           "approvalStatus": "Pending",
           "isLocked": false,
@@ -1076,7 +1076,7 @@
         {
           "id": 11,
           "name": "Medical",
-          "description": "Uploaded Medical",
+          "description": "Medical fitness certificate and health examination report",
           "uploadStatus": "Upload Pending",
           "approvalStatus": "Pending",
           "isLocked": false,
