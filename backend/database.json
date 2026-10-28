@@ -111,6 +111,22 @@
     "skzntz2smvj4s3eg": {
       "email": "manasansreedharan123@gmail.com",
       "expiresAt": 1792652349112
+    },
+    "hwim4jx2mvrz21yv": {
+      "email": "worksufs@gmail.com",
+      "expiresAt": 1793186931703
+    },
+    "ahebylzgmvrz3jnn": {
+      "email": "worksufs@gmail.com",
+      "expiresAt": 1793187001283
+    },
+    "hy6dldb3mvrz46di": {
+      "email": "manasansreedharan123@gmail.com",
+      "expiresAt": 1793187030726
+    },
+    "lg0a78smmvrz4zij": {
+      "email": "worksufs@gmail.com",
+      "expiresAt": 1793187068491
     }
   },
   "users": [
@@ -139,19 +155,19 @@
         {
           "id": 1,
           "name": "Photos",
-          "description": "Recent passport-size and profile photographs",
+          "description": "Uploaded Photos",
           "uploadStatus": "Uploaded",
           "approvalStatus": "Pending",
           "isLocked": false,
           "currentVersion": 1,
           "uploadDateTime": "28/10/2026",
-          "driveFileId": null,
+          "driveFileId": "15sE5IlvwHTHNGayB9Ict5-L-KPyAgc6-",
           "fileName": "Photos.jpeg",
           "savedFileName": null,
           "fileSize": null,
           "mimeType": null,
-          "webViewLink": "/api/drive/files/15sE5IlvwHTHNGayB9Ict5-L-KPyAgc6-/view",
-          "downloadUrl": "/api/drive/files/15sE5IlvwHTHNGayB9Ict5-L-KPyAgc6-/view",
+          "webViewLink": "https://drive.google.com/file/d/15sE5IlvwHTHNGayB9Ict5-L-KPyAgc6-/view",
+          "downloadUrl": "https://drive.google.com/file/d/15sE5IlvwHTHNGayB9Ict5-L-KPyAgc6-/view",
           "storageType": "google_drive_cloud",
           "notes": "",
           "adminFeedback": "",
@@ -159,8 +175,9 @@
             {
               "versionNumber": 1,
               "fileName": "Photos.jpeg",
-              "webViewLink": "/api/drive/files/15sE5IlvwHTHNGayB9Ict5-L-KPyAgc6-/view",
-              "downloadUrl": "/api/drive/files/15sE5IlvwHTHNGayB9Ict5-L-KPyAgc6-/view",
+              "webViewLink": "https://drive.google.com/file/d/15sE5IlvwHTHNGayB9Ict5-L-KPyAgc6-/view",
+              "downloadUrl": "https://drive.google.com/file/d/15sE5IlvwHTHNGayB9Ict5-L-KPyAgc6-/view",
+              "driveFileId": "15sE5IlvwHTHNGayB9Ict5-L-KPyAgc6-",
               "notes": "",
               "uploadDateTime": "28/10/2026",
               "studentDocumentId": 49
@@ -170,7 +187,7 @@
         {
           "id": 2,
           "name": "Intro Videos",
-          "description": "Short self-introduction video presentation",
+          "description": "Uploaded Intro Videos",
           "uploadStatus": "Upload Pending",
           "approvalStatus": "Pending",
           "isLocked": false,
@@ -191,7 +208,7 @@
         {
           "id": 3,
           "name": "10th",
-          "description": "Secondary School Certificate (10th Standard / Matriculation)",
+          "description": "Uploaded 10th",
           "uploadStatus": "Upload Pending",
           "approvalStatus": "Pending",
           "isLocked": false,
@@ -212,7 +229,7 @@
         {
           "id": 4,
           "name": "Plus Two",
-          "description": "Higher Secondary Certificate (12th / Plus Two)",
+          "description": "Uploaded Plus Two",
           "uploadStatus": "Upload Pending",
           "approvalStatus": "Pending",
           "isLocked": false,
@@ -233,7 +250,7 @@
         {
           "id": 5,
           "name": "Language Certificates",
-          "description": "Certified German / English language proficiency certificates",
+          "description": "Uploaded Language Certificates",
           "uploadStatus": "Upload Pending",
           "approvalStatus": "Pending",
           "isLocked": false,
@@ -254,7 +271,7 @@
         {
           "id": 6,
           "name": "Letter of Recommendation",
-          "description": "Official recommendation or reference letters",
+          "description": "Uploaded Letter of Recommendation",
           "uploadStatus": "Upload Pending",
           "approvalStatus": "Pending",
           "isLocked": false,
@@ -275,7 +292,7 @@
         {
           "id": 7,
           "name": "Childcare Reference",
-          "description": "Verified childcare experience certificate and reference",
+          "description": "Uploaded Childcare Reference",
           "uploadStatus": "Upload Pending",
           "approvalStatus": "Pending",
           "isLocked": false,
@@ -296,7 +313,7 @@
         {
           "id": 8,
           "name": "German CV",
-          "description": "Standard Europass / German format tabular CV (Lebenslauf)",
+          "description": "Uploaded German CV",
           "uploadStatus": "Upload Pending",
           "approvalStatus": "Pending",
           "isLocked": false,
@@ -317,7 +334,7 @@
         {
           "id": 9,
           "name": "Motivation Letter",
-          "description": "Personal statement of motivation (Anschreiben)",
+          "description": "Uploaded Motivation Letter",
           "uploadStatus": "Upload Pending",
           "approvalStatus": "Pending",
           "isLocked": false,
@@ -338,7 +355,7 @@
         {
           "id": 10,
           "name": "PCC",
-          "description": "Police Clearance Certificate (Criminal background check)",
+          "description": "Uploaded PCC",
           "uploadStatus": "Upload Pending",
           "approvalStatus": "Pending",
           "isLocked": false,
@@ -359,7 +376,7 @@
         {
           "id": 11,
           "name": "Medical",
-          "description": "Medical fitness certificate and health examination report",
+          "description": "Uploaded Medical",
           "uploadStatus": "Upload Pending",
           "approvalStatus": "Pending",
           "isLocked": false,
@@ -500,32 +517,22 @@
           "id": 1,
           "name": "Photos",
           "description": "Uploaded Photos",
-          "uploadStatus": "Uploaded",
+          "uploadStatus": "Upload Pending",
           "approvalStatus": "Pending",
           "isLocked": false,
-          "currentVersion": 1,
-          "uploadDateTime": "28/10/2026",
+          "currentVersion": 0,
+          "uploadDateTime": null,
           "driveFileId": null,
-          "fileName": "Photos.jpeg",
+          "fileName": null,
           "savedFileName": null,
           "fileSize": null,
           "mimeType": null,
-          "webViewLink": "/api/drive/files/1FXxjVY-fEf3mwWgNDvtIzAu_h9hojulO/view",
-          "downloadUrl": "/api/drive/files/1FXxjVY-fEf3mwWgNDvtIzAu_h9hojulO/view",
+          "webViewLink": null,
+          "downloadUrl": null,
           "storageType": "google_drive_cloud",
           "notes": "",
           "adminFeedback": "",
-          "versions": [
-            {
-              "versionNumber": 1,
-              "fileName": "Photos.jpeg",
-              "webViewLink": "/api/drive/files/1FXxjVY-fEf3mwWgNDvtIzAu_h9hojulO/view",
-              "downloadUrl": "/api/drive/files/1FXxjVY-fEf3mwWgNDvtIzAu_h9hojulO/view",
-              "notes": "",
-              "uploadDateTime": "28/10/2026",
-              "studentDocumentId": 47
-            }
-          ]
+          "versions": []
         },
         {
           "id": 2,
@@ -849,7 +856,7 @@
       "email": "manasansreedharan123@gmail.com",
       "username": "manu",
       "name": "Manu",
-      "password": "password123",
+      "password": "Password@123",
       "role": "user",
       "department": "General Operations",
       "studentCode": "STU003",
@@ -1196,7 +1203,7 @@
     },
     {
       "id": "u-STU004",
-      "email": "worksufs@gmail.com",
+      "email": "manasasreeoffi@gmail.com",
       "username": "anu",
       "name": "Anu",
       "password": "Password123",
@@ -1210,32 +1217,22 @@
           "id": 1,
           "name": "Photos",
           "description": "Uploaded Photos",
-          "uploadStatus": "Uploaded",
+          "uploadStatus": "Upload Pending",
           "approvalStatus": "Pending",
           "isLocked": false,
-          "currentVersion": 1,
-          "uploadDateTime": "28/10/2026",
+          "currentVersion": 0,
+          "uploadDateTime": null,
           "driveFileId": null,
-          "fileName": "Photos.jpeg",
+          "fileName": null,
           "savedFileName": null,
           "fileSize": null,
           "mimeType": null,
-          "webViewLink": "/api/drive/files/1MSzqkXvvdvkhQV8IKgNjbQE5derGE_QP/view",
-          "downloadUrl": "/api/drive/files/1MSzqkXvvdvkhQV8IKgNjbQE5derGE_QP/view",
+          "webViewLink": null,
+          "downloadUrl": null,
           "storageType": "google_drive_cloud",
           "notes": "",
           "adminFeedback": "",
-          "versions": [
-            {
-              "versionNumber": 1,
-              "fileName": "Photos.jpeg",
-              "webViewLink": "/api/drive/files/1MSzqkXvvdvkhQV8IKgNjbQE5derGE_QP/view",
-              "downloadUrl": "/api/drive/files/1MSzqkXvvdvkhQV8IKgNjbQE5derGE_QP/view",
-              "notes": "",
-              "uploadDateTime": "28/10/2026",
-              "studentDocumentId": 48
-            }
-          ]
+          "versions": []
         },
         {
           "id": 2,

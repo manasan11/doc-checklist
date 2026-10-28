@@ -824,10 +824,16 @@ export class DashboardComponent implements OnInit {
     const fileId = targetVer?.driveFileId || doc.driveFileId;
     let targetPath = '';
 
-    if (fileId) {
-      targetPath = `/api/drive/files/${fileId}/view`;
+    // Directly open Google Drive viewer for uploaded Google Drive files
+    if (fileId && !fileId.startsWith('local_') && !fileId.startsWith('gdrive_')) {
+      targetPath = `https://drive.google.com/file/d/${fileId}/view`;
     } else if (targetVer?.webViewLink || doc.webViewLink) {
       targetPath = targetVer?.webViewLink || doc.webViewLink || '';
+      // If webViewLink references /api/drive/files/<driveFileId>, extract Drive file ID and link directly
+      const driveMatch = targetPath.match(/\/api\/drive\/files\/([^\/]+)/);
+      if (driveMatch && driveMatch[1] && !driveMatch[1].startsWith('local_') && !driveMatch[1].startsWith('gdrive_')) {
+        targetPath = `https://drive.google.com/file/d/${driveMatch[1]}/view`;
+      }
     }
 
     if (targetPath) {

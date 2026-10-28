@@ -255,7 +255,7 @@ async function seedFromDatabaseJson(conn) {
                   Student_Name=VALUES(Student_Name),
                   Email=VALUES(Email),
                   Username=VALUES(Username),
-                  Password=VALUES(Password),
+                  Password=COALESCE(student.Password, VALUES(Password)),
                   Unique_Id=VALUES(Unique_Id),
                   DeleteStatus=0,
                   Is_Registered=1

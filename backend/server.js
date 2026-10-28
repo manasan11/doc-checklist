@@ -143,20 +143,40 @@ app.post('/api/auth/forgot-password', async (req, res) => {
     try {
       const pool = db.getPool();
       if (pool) {
-        const [rows] = await pool.query(
-          'SELECT * FROM users WHERE LOWER(TRIM(username)) = ? OR LOWER(TRIM(email)) = ?',
-          [cleanLower, cleanLower]
+        // 1. Check student table first (primary table)
+        const [stuRows] = await pool.query(
+          'SELECT * FROM student WHERE (LOWER(TRIM(Username)) = ? OR LOWER(TRIM(Email)) = ? OR Student_Id = ?) AND (DeleteStatus = 0 OR DeleteStatus IS NULL)',
+          [cleanLower, cleanLower, cleanLower]
         );
-        if (rows && rows.length > 0) {
-          const row = rows[0];
+        if (stuRows && stuRows.length > 0) {
+          const s = stuRows[0];
           user = {
-            id: row.id,
-            email: row.email,
-            username: row.username,
-            name: row.name,
-            role: row.role,
-            department: row.department
+            id: `u-${s.Student_Id}`,
+            email: s.Email,
+            username: s.Username || s.Email,
+            name: s.Student_Name,
+            role: 'user',
+            department: s.Proceeding_Course_Name || 'General Operations',
+            studentCode: s.Student_Id
           };
+        } else {
+          // 2. Check users table
+          const [rows] = await pool.query(
+            'SELECT * FROM users WHERE LOWER(TRIM(username)) = ? OR LOWER(TRIM(email)) = ?',
+            [cleanLower, cleanLower]
+          );
+          if (rows && rows.length > 0) {
+            const row = rows[0];
+            user = {
+              id: row.id,
+              email: row.email,
+              username: row.username,
+              name: row.name,
+              role: row.role,
+              department: row.department,
+              studentCode: row.student_code
+            };
+          }
         }
       }
     } catch (dbErr) {
@@ -172,7 +192,7 @@ app.post('/api/auth/forgot-password', async (req, res) => {
     }
 
     // Generate token strictly for THAT user's registered email
-    const resetToken = dataStore.createResetToken(user.email);
+    const resetToken = dataStore.createResetToken(user.email, user);
 
     // Resolve client origin
     const origin = req.headers.origin || req.headers.referer;
@@ -253,14 +273,23 @@ app.post('/api/auth/reset-password', async (req, res) => {
     return res.status(400).json({ error: result.message });
   }
 
-  // Also update MySQL table users directly
+  // Also update MySQL table directly to guarantee persistence in student and users tables
   try {
     const pool = db.getPool();
     if (pool && result.email) {
-      await pool.query('UPDATE users SET password = ? WHERE LOWER(TRIM(email)) = ?', [newPassword, result.email.toLowerCase().trim()]);
+      const cleanEmail = result.email.toLowerCase().trim();
+      await pool.query(
+        'UPDATE student SET Password = ? WHERE LOWER(TRIM(Email)) = ? OR LOWER(TRIM(Username)) = ?',
+        [newPassword, cleanEmail, cleanEmail]
+      );
+      await pool.query(
+        'UPDATE users SET password = ? WHERE LOWER(TRIM(email)) = ? OR LOWER(TRIM(username)) = ?',
+        [newPassword, cleanEmail, cleanEmail]
+      );
+      await dataStore.loadFromMysql();
     }
   } catch (err) {
-    console.warn('[MySQL] Notice updating password in users table:', err.message);
+    console.warn('[MySQL] Notice updating password in student/users table:', err.message);
   }
 
   return res.json({
@@ -284,19 +313,32 @@ app.post('/api/auth/change-password', authenticateToken, async (req, res) => {
     return res.status(400).json({ error: 'New password and confirm password do not match.' });
   }
 
-  const result = dataStore.updateUserPassword(req.user.id, newPassword);
+  const result = await dataStore.updateUserPassword(req.user.id, newPassword);
   if (!result.success) {
-    return res.status(400).json({ error: result.message });
+    return res.status(400).json({ error: result.message || 'Failed to update password.' });
   }
 
-  // Also update MySQL table users directly
+  // Also update MySQL table student and users directly to guarantee persistence
   try {
     const pool = db.getPool();
     if (pool) {
-      await pool.query('UPDATE users SET password = ? WHERE id = ?', [newPassword, req.user.id]);
+      const user = dataStore.findUserById(req.user.id);
+      const studentCode = user?.studentCode || (String(req.user.id).includes('STU') ? String(req.user.id).replace(/^u-/, '') : null);
+      const cleanEmail = (req.user.email || user?.email || '').toLowerCase().trim();
+      const cleanUsername = (user?.username || '').toLowerCase().trim();
+
+      await pool.query(
+        'UPDATE student SET Password = ? WHERE (Student_Id IS NOT NULL AND Student_Id = ?) OR (LOWER(TRIM(Email)) = ? AND Email IS NOT NULL AND Email != "") OR (LOWER(TRIM(Username)) = ? AND Username IS NOT NULL AND Username != "")',
+        [newPassword, studentCode, cleanEmail, cleanUsername]
+      );
+      await pool.query(
+        'UPDATE users SET password = ? WHERE id = ? OR (student_code IS NOT NULL AND student_code = ?) OR (LOWER(TRIM(email)) = ? AND email IS NOT NULL AND email != "")',
+        [newPassword, req.user.id, studentCode, cleanEmail]
+      );
+      await dataStore.loadFromMysql();
     }
   } catch (err) {
-    console.warn('[MySQL] Notice updating password in users table:', err.message);
+    console.warn('[MySQL] Notice updating password in student/users table:', err.message);
   }
 
   return res.json({
@@ -943,11 +985,16 @@ function renderDocumentPage(originalName, docHtml, downloadUrl) {
 </html>`;
 }
 
-// Serve drive file preview / view
+// Serve drive file preview / view - redirects directly to Google Drive for cloud files
 app.get('/api/drive/files/:id/view', async (req, res) => {
   const fileId = req.params.id;
 
-  // 1. If live Google Drive is configured and ID is a cloud file
+  // 1. If it's a Google Drive cloud file, redirect directly to Google Drive
+  if (!fileId.startsWith('gdrive_') && !fileId.startsWith('local_')) {
+    return res.redirect(`https://drive.google.com/file/d/${fileId}/view`);
+  }
+
+  // 1b. If live Google Drive is configured and ID is a cloud file
   if (driveService.isLiveDriveConfigured() && !fileId.startsWith('gdrive_') && !fileId.startsWith('local_')) {
     try {
       const meta = await driveService.getFileMetadata(fileId);

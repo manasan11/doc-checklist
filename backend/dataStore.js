@@ -22,6 +22,18 @@ const INITIAL_DOCUMENTS = [
   { id: 16, name: "Special / Document : Test *", description: "Uploaded Special / Document : Test *" }
 ];
 
+function toGoogleDriveViewUrl(urlOrPath, fallbackFileId = null) {
+  if (!urlOrPath && !fallbackFileId) return '';
+  const val = String(urlOrPath || '').trim();
+  if (val.startsWith('https://drive.google.com/')) return val;
+  const match = val.match(/\/api\/drive\/files\/([^\/]+)/);
+  const fid = (match && match[1]) || fallbackFileId;
+  if (fid && !fid.startsWith('local_') && !fid.startsWith('gdrive_')) {
+    return `https://drive.google.com/file/d/${fid}/view`;
+  }
+  return val;
+}
+
 function createDefaultDocuments() {
   return INITIAL_DOCUMENTS.map(doc => ({
     id: doc.id,
@@ -141,7 +153,7 @@ class DataStore {
                 Student_Name=VALUES(Student_Name),
                 Email=VALUES(Email),
                 Username=VALUES(Username),
-                Password=VALUES(Password),
+                Password=COALESCE(student.Password, VALUES(Password)),
                 Unique_Id=VALUES(Unique_Id),
                 DeleteStatus=0,
                 Is_Registered=1
@@ -257,22 +269,32 @@ class DataStore {
           if (docItem) {
             if (activeRecords.length > 0) {
               const latestActive = activeRecords[activeRecords.length - 1];
+              const latestDriveUrl = toGoogleDriveViewUrl(latestActive.Image);
+              const driveFileIdMatch = (latestDriveUrl || '').match(/\/file\/d\/([^\/]+)/);
+              const latestDriveId = driveFileIdMatch ? driveFileIdMatch[1] : null;
+
               docItem.uploadStatus = 'Uploaded';
               docItem.fileName = latestActive.File_Name;
-              docItem.webViewLink = latestActive.Image;
-              docItem.downloadUrl = latestActive.Image;
+              docItem.webViewLink = latestDriveUrl;
+              docItem.downloadUrl = latestDriveUrl;
+              docItem.driveFileId = latestDriveId || docItem.driveFileId;
               docItem.notes = latestActive.Description || '';
               docItem.currentVersion = activeRecords.length;
               docItem.uploadDateTime = latestActive.Entry_date ? new Date(latestActive.Entry_date).toLocaleDateString() : null;
-              docItem.versions = activeRecords.map((r, idx) => ({
-                versionNumber: idx + 1,
-                fileName: r.File_Name,
-                webViewLink: r.Image,
-                downloadUrl: r.Image,
-                notes: r.Description || '',
-                uploadDateTime: r.Entry_date ? new Date(r.Entry_date).toLocaleDateString() : null,
-                studentDocumentId: r.Student_Document_Id
-              }));
+              docItem.versions = activeRecords.map((r, idx) => {
+                const verDriveUrl = toGoogleDriveViewUrl(r.Image);
+                const verIdMatch = (verDriveUrl || '').match(/\/file\/d\/([^\/]+)/);
+                return {
+                  versionNumber: idx + 1,
+                  fileName: r.File_Name,
+                  webViewLink: verDriveUrl,
+                  downloadUrl: verDriveUrl,
+                  driveFileId: verIdMatch ? verIdMatch[1] : null,
+                  notes: r.Description || '',
+                  uploadDateTime: r.Entry_date ? new Date(r.Entry_date).toLocaleDateString() : null,
+                  studentDocumentId: r.Student_Document_Id
+                };
+              });
             } else {
               docItem.uploadStatus = 'Upload Pending';
               docItem.fileName = null;
@@ -283,6 +305,10 @@ class DataStore {
           } else if (activeRecords.length > 0) {
             // Custom document added in student_document
             const latestActive = activeRecords[activeRecords.length - 1];
+            const latestDriveUrl = toGoogleDriveViewUrl(latestActive.Image);
+            const driveFileIdMatch = (latestDriveUrl || '').match(/\/file\/d\/([^\/]+)/);
+            const latestDriveId = driveFileIdMatch ? driveFileIdMatch[1] : null;
+
             userDocs.push({
               id: docId,
               name: latestActive.Document_Name || `Document ${docId}`,
@@ -293,19 +319,25 @@ class DataStore {
               currentVersion: activeRecords.length,
               uploadDateTime: latestActive.Entry_date ? new Date(latestActive.Entry_date).toLocaleDateString() : null,
               fileName: latestActive.File_Name,
-              webViewLink: latestActive.Image,
-              downloadUrl: latestActive.Image,
+              webViewLink: latestDriveUrl,
+              downloadUrl: latestDriveUrl,
+              driveFileId: latestDriveId,
               notes: latestActive.Description || '',
               adminFeedback: '',
-              versions: activeRecords.map((r, idx) => ({
-                versionNumber: idx + 1,
-                fileName: r.File_Name,
-                webViewLink: r.Image,
-                downloadUrl: r.Image,
-                notes: r.Description || '',
-                uploadDateTime: r.Entry_date ? new Date(r.Entry_date).toLocaleDateString() : null,
-                studentDocumentId: r.Student_Document_Id
-              }))
+              versions: activeRecords.map((r, idx) => {
+                const verDriveUrl = toGoogleDriveViewUrl(r.Image);
+                const verIdMatch = (verDriveUrl || '').match(/\/file\/d\/([^\/]+)/);
+                return {
+                  versionNumber: idx + 1,
+                  fileName: r.File_Name,
+                  webViewLink: verDriveUrl,
+                  downloadUrl: verDriveUrl,
+                  driveFileId: verIdMatch ? verIdMatch[1] : null,
+                  notes: r.Description || '',
+                  uploadDateTime: r.Entry_date ? new Date(r.Entry_date).toLocaleDateString() : null,
+                  studentDocumentId: r.Student_Document_Id
+                };
+              })
             });
           }
         }
@@ -365,8 +397,8 @@ class DataStore {
 
         // 1a. Check student table first for student logins (Matches MySQL Workbench)
         const [stuRows] = await pool.query(
-          'SELECT * FROM student WHERE (LOWER(TRIM(Username)) = ? OR LOWER(TRIM(Email)) = ?) AND (DeleteStatus = 0 OR DeleteStatus IS NULL)',
-          [cleanLower, cleanLower]
+          'SELECT * FROM student WHERE (LOWER(TRIM(Username)) = ? OR LOWER(TRIM(Email)) = ? OR Student_Id = ?) AND (DeleteStatus = 0 OR DeleteStatus IS NULL)',
+          [cleanLower, cleanLower, cleanId]
         );
         if (stuRows && stuRows.length > 0) {
           const s = stuRows[0];
@@ -673,6 +705,7 @@ class DataStore {
       const currentDoc = user.documents[docIndex];
       targetDocId = currentDoc.id;
       const newVersionNum = (currentDoc.currentVersion || 0) + 1;
+      const directDriveLink = toGoogleDriveViewUrl(fileResult.driveWebViewLink || fileResult.webViewLink, fileResult.driveFileId);
 
       const newVersionRecord = {
         versionNumber: newVersionNum,
@@ -683,8 +716,8 @@ class DataStore {
         savedFileName: fileResult.savedFileName || null,
         fileSize: fileResult.fileSize,
         mimeType: fileResult.mimeType,
-        webViewLink: fileResult.webViewLink,
-        downloadUrl: fileResult.downloadUrl || null,
+        webViewLink: directDriveLink,
+        downloadUrl: directDriveLink,
         storageType: fileResult.storageType,
         notes: userNotes,
         approvalStatusAtUpload: "Pending"
@@ -706,8 +739,8 @@ class DataStore {
         savedFileName: fileResult.savedFileName || null,
         fileSize: fileResult.fileSize,
         mimeType: fileResult.mimeType,
-        webViewLink: fileResult.webViewLink,
-        downloadUrl: fileResult.downloadUrl || null,
+        webViewLink: directDriveLink,
+        downloadUrl: directDriveLink,
         storageType: fileResult.storageType,
         notes: userNotes,
         adminFeedback: "",
@@ -717,6 +750,7 @@ class DataStore {
       // Create new dynamic document type (Requirement 1, 4, 8)
       targetDocId = user.documents.reduce((max, d) => Math.max(max, d.id || 0), 0) + 1;
       const docName = documentType && documentType.trim() ? documentType.trim() : `Document ${targetDocId}`;
+      const directDriveLink = toGoogleDriveViewUrl(fileResult.driveWebViewLink || fileResult.webViewLink, fileResult.driveFileId);
 
       const newVersionRecord = {
         versionNumber: 1,
@@ -727,8 +761,8 @@ class DataStore {
         savedFileName: fileResult.savedFileName || null,
         fileSize: fileResult.fileSize,
         mimeType: fileResult.mimeType,
-        webViewLink: fileResult.webViewLink,
-        downloadUrl: fileResult.downloadUrl || null,
+        webViewLink: directDriveLink,
+        downloadUrl: directDriveLink,
         storageType: fileResult.storageType,
         notes: userNotes,
         approvalStatusAtUpload: "Pending"
@@ -749,8 +783,8 @@ class DataStore {
         savedFileName: fileResult.savedFileName || null,
         fileSize: fileResult.fileSize,
         mimeType: fileResult.mimeType,
-        webViewLink: fileResult.webViewLink,
-        downloadUrl: fileResult.downloadUrl || null,
+        webViewLink: directDriveLink,
+        downloadUrl: directDriveLink,
         storageType: fileResult.storageType,
         notes: userNotes,
         adminFeedback: "",
@@ -777,6 +811,7 @@ class DataStore {
 
       const user = this.findUserById(userId);
       const studentCode = user?.studentCode || (userId && userId.includes('STU') ? userId.replace(/^u-/, '') : `STU${String((userId || '').replace(/\D/g, '') || 1).padStart(3, '0')}`);
+      const directDriveLink = toGoogleDriveViewUrl(fileResult.driveWebViewLink || fileResult.webViewLink, fileResult.driveFileId);
 
       // 1. Ensure master document catalog has this document
       await pool.query(`
@@ -785,7 +820,7 @@ class DataStore {
         ON DUPLICATE KEY UPDATE Document_Name=VALUES(Document_Name), DeleteStatus=0
       `, [doc.id, doc.name]);
 
-      // 2. Direct insert into student_document table (Every upload or re-upload creates a new row with STU001 format)
+      // 2. Direct insert into student_document table (Every upload or re-upload creates a new row with STU001 format and direct Google Drive URL)
       if (studentCode) {
         const [insertRes] = await pool.query(`
           INSERT INTO student_document (
@@ -796,7 +831,7 @@ class DataStore {
           fileResult.fileName || doc.fileName || doc.name,
           doc.id,
           doc.name,
-          fileResult.webViewLink || fileResult.driveFileId || doc.webViewLink || '',
+          directDriveLink,
           userNotes || doc.notes || ''
         ]);
         return insertRes?.insertId || null;
@@ -1025,7 +1060,7 @@ class DataStore {
   }
 
   // Password reset helper
-  createResetToken(email) {
+  createResetToken(email, user = null) {
     this.data = this.load();
     if (!this.data.resetTokens) {
       this.data.resetTokens = {};
@@ -1033,6 +1068,9 @@ class DataStore {
     const token = Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
     this.data.resetTokens[token] = {
       email,
+      username: user?.username || null,
+      studentCode: user?.studentCode || (user?.id ? String(user.id).replace(/^u-/, '') : null),
+      userId: user?.id || null,
       expiresAt: Date.now() + 3600000 // 1 hour
     };
     this.save();
@@ -1056,19 +1094,31 @@ class DataStore {
     }
 
     const targetEmail = (record.email || '').toLowerCase().trim();
+    const targetUsername = (record.username || '').toLowerCase().trim();
+    const studentCode = record.studentCode || (record.userId ? String(record.userId).replace(/^u-/, '') : null);
 
-    // 1. Update in MySQL directly (Primary DB)
+    // 1. Update in MySQL student table and users table directly (Primary DB)
     let mysqlUpdated = false;
     try {
       const db = require('./db');
       const pool = db.getPool();
       if (pool) {
-        const [res] = await pool.query(
-          'UPDATE users SET password = ? WHERE LOWER(TRIM(email)) = ?',
-          [newPassword, targetEmail]
+        // Update student table (Primary table for students)
+        const [stuRes] = await pool.query(
+          'UPDATE student SET Password = ? WHERE (Student_Id IS NOT NULL AND Student_Id = ?) OR (LOWER(TRIM(Email)) = ? AND Email IS NOT NULL AND Email != "") OR (LOWER(TRIM(Username)) = ? AND Username IS NOT NULL AND Username != "")',
+          [newPassword, studentCode, targetEmail, targetUsername || targetEmail]
         );
-        mysqlUpdated = res && (res.affectedRows > 0 || res.changedRows > 0);
-        console.log(`[DataStore] MySQL password successfully updated for ${targetEmail}`);
+
+        // Also update users table if present
+        try {
+          await pool.query(
+            'UPDATE users SET password = ? WHERE (student_code IS NOT NULL AND student_code = ?) OR (id IS NOT NULL AND id = ?) OR (LOWER(TRIM(email)) = ? AND email IS NOT NULL AND email != "") OR (LOWER(TRIM(username)) = ? AND username IS NOT NULL AND username != "")',
+            [newPassword, studentCode, record.userId, targetEmail, targetUsername || targetEmail]
+          );
+        } catch (_) {}
+
+        mysqlUpdated = stuRes && (stuRes.affectedRows > 0 || stuRes.changedRows > 0);
+        console.log(`[DataStore] MySQL student password updated: studentCode=${studentCode}, email=${targetEmail}, affected=${stuRes?.affectedRows}`);
       }
     } catch (err) {
       console.warn('[DataStore] MySQL update error during password reset:', err.message);
@@ -1077,7 +1127,14 @@ class DataStore {
     // 2. Also update all matching user records in local dataStore
     let foundLocal = false;
     for (const u of (this.data.users || [])) {
-      if ((u.email || '').toLowerCase().trim() === targetEmail) {
+      const uEmail = (u.email || '').toLowerCase().trim();
+      const uUser = (u.username || '').toLowerCase().trim();
+      const uCode = u.studentCode || (u.id ? String(u.id).replace(/^u-/, '') : null);
+      if (
+        (targetEmail && uEmail === targetEmail) ||
+        (targetUsername && uUser === targetUsername) ||
+        (studentCode && uCode === studentCode)
+      ) {
         u.password = newPassword;
         foundLocal = true;
       }
@@ -1097,17 +1154,54 @@ class DataStore {
       console.error('Error saving db:', e);
     }
 
+    // Reload from MySQL so in-memory user objects reflect the new password
+    try {
+      await this.loadFromMysql();
+    } catch (_) {}
+
     return { success: true, email: targetEmail };
   }
 
-  updateUserPassword(userId, newPassword) {
+  async updateUserPassword(userId, newPassword) {
+    this.data = this.load();
     const user = this.findUserById(userId);
     if (!user) {
       return { success: false, message: "User account not found." };
     }
 
     user.password = newPassword;
+
+    // Update in MySQL student table
+    try {
+      const db = require('./db');
+      const pool = db.getPool();
+      if (pool) {
+        const studentCode = user.studentCode || (String(userId).includes('STU') ? String(userId).replace(/^u-/, '') : null);
+        const cleanEmail = (user.email || '').toLowerCase().trim();
+        const cleanUsername = (user.username || '').toLowerCase().trim();
+
+        const [stuRes] = await pool.query(
+          'UPDATE student SET Password = ? WHERE (Student_Id IS NOT NULL AND Student_Id = ?) OR (LOWER(TRIM(Email)) = ? AND Email IS NOT NULL AND Email != "") OR (LOWER(TRIM(Username)) = ? AND Username IS NOT NULL AND Username != "")',
+          [newPassword, studentCode, cleanEmail, cleanUsername]
+        );
+        console.log(`[DataStore] updateUserPassword: MySQL student table updated: studentCode=${studentCode}, affected=${stuRes?.affectedRows}`);
+
+        try {
+          await pool.query(
+            'UPDATE users SET password = ? WHERE id = ? OR (student_code IS NOT NULL AND student_code = ?) OR (LOWER(TRIM(email)) = ? AND email IS NOT NULL AND email != "")',
+            [newPassword, user.id, studentCode, cleanEmail]
+          );
+        } catch (_) {}
+      }
+    } catch (err) {
+      console.warn('[MySQL] Error updating password in student table:', err.message);
+    }
+
     this.save();
+    try {
+      await this.loadFromMysql();
+    } catch (_) {}
+
     return { success: true, email: user.email };
   }
 
