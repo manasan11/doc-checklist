@@ -133,7 +133,7 @@ class DataStore {
       for (const user of (data.users || [])) {
         if (user.role !== 'admin') {
           try {
-            const stuNumId = parseInt((user.id || '').replace(/\D/g, ''), 10) || null;
+            const studentCode = user.studentCode || (user.id && user.id.includes('STU') ? user.id.replace(/^u-/, '') : `STU${String((user.id || '').replace(/\D/g, '') || 1).padStart(3, '0')}`);
             await pool.query(`
               INSERT INTO student (Student_Id, Student_Name, Email, Username, Password, Unique_Id, Entry_date, DeleteStatus, Is_Registered)
               VALUES (?, ?, ?, ?, ?, ?, NOW(), 0, 1)
@@ -146,7 +146,7 @@ class DataStore {
                 DeleteStatus=0,
                 Is_Registered=1
             `, [
-              stuNumId, user.name, user.email, user.username, user.password, user.studentCode || null
+              studentCode, user.name, user.email, user.username, user.password, studentCode
             ]);
           } catch (_) {}
         }
@@ -228,13 +228,17 @@ class DataStore {
 
       // 3. For each student, map their checklist and uploaded files from student_document
       for (const s of students) {
-        const sid = `u-${s.Student_Id}`;
+        const studentCode = s.Student_Id || s.Unique_Id;
+        const sid = `u-${studentCode}`;
         const userDocs = JSON.parse(JSON.stringify(defaultDocTemplates));
 
-        // Get this student's uploaded documents (in chronological order)
+        const numPart = (studentCode || '').replace(/\D/g, '');
+        const legacyNumId = numPart ? parseInt(numPart, 10) : null;
+
+        // Get this student's uploaded documents (in chronological order) - supports both STU001 and legacy numeric ID
         const [stuDocs] = await pool.query(
-          'SELECT * FROM student_document WHERE Student_Id = ? ORDER BY Student_Document_Id ASC',
-          [s.Student_Id]
+          'SELECT * FROM student_document WHERE Student_Id = ? OR Student_Id = ? ORDER BY Student_Document_Id ASC',
+          [studentCode, legacyNumId ? String(legacyNumId) : studentCode]
         );
 
         // Group student_document rows by Document_Id to support all re-uploaded files / versions
@@ -307,17 +311,17 @@ class DataStore {
         }
 
         // Preserve driveFolder info from existing in-memory user if available
-        const existingMemUser = (this.data && this.data.users) ? this.data.users.find(u => u.id === sid) : null;
+        const existingMemUser = (this.data && this.data.users) ? this.findUserById(sid) : null;
 
         loadedUsers.push({
           id: sid,
           email: s.Email,
-          username: s.Username || (s.Email ? s.Email.split('@')[0] : `student${s.Student_Id}`),
+          username: s.Username || (s.Email ? s.Email.split('@')[0] : `student_${studentCode}`),
           name: s.Student_Name,
           password: s.Password || 'Password123',
           role: 'user',
           department: s.Proceeding_Course_Name || 'General Operations',
-          studentCode: s.Unique_Id || `STU${String(s.Student_Id).padStart(3, '0')}`,
+          studentCode: studentCode,
           driveFolderId: existingMemUser ? existingMemUser.driveFolderId : null,
           driveFolderName: existingMemUser ? existingMemUser.driveFolderName : null,
           documents: userDocs
@@ -483,11 +487,19 @@ class DataStore {
   findUserById(userId) {
     if (!userId) return null;
     this.data = this.load();
-    let user = this.data.users.find(u => u.id === userId);
+    const cleanId = String(userId).trim();
+    const numPart = cleanId.replace(/\D/g, '');
+    let user = this.data.users.find(u => {
+      if (u.id === cleanId) return true;
+      if (u.studentCode && (u.studentCode === cleanId || `u-${u.studentCode}` === cleanId)) return true;
+      if (numPart && u.studentCode === `STU${String(numPart).padStart(3, '0')}`) return true;
+      if (numPart && (u.id || '').replace(/\D/g, '') === numPart) return true;
+      return false;
+    });
     if (!user) {
-      if (userId === 'u-1792558150978-147' || userId === 'u-2') {
+      if (cleanId === 'u-1792558150978-147' || cleanId === 'u-2') {
         user = this.data.users.find(u => u.id === 'u-2' || u.id === 'u-1792558150978-147' || u.email === 'demo@example.com');
-      } else if (userId === 'u-1792558257163-754' || userId === 'u-3') {
+      } else if (cleanId === 'u-1792558257163-754' || cleanId === 'u-3') {
         user = this.data.users.find(u => u.id === 'u-3' || u.id === 'u-1792558257163-754' || u.email === 'user@demo');
       }
     }
@@ -763,7 +775,8 @@ class DataStore {
       const pool = db.getPool();
       if (!pool) return null;
 
-      const stuNumId = parseInt((userId || '').replace(/\D/g, ''), 10) || null;
+      const user = this.findUserById(userId);
+      const studentCode = user?.studentCode || (userId && userId.includes('STU') ? userId.replace(/^u-/, '') : `STU${String((userId || '').replace(/\D/g, '') || 1).padStart(3, '0')}`);
 
       // 1. Ensure master document catalog has this document
       await pool.query(`
@@ -772,14 +785,14 @@ class DataStore {
         ON DUPLICATE KEY UPDATE Document_Name=VALUES(Document_Name), DeleteStatus=0
       `, [doc.id, doc.name]);
 
-      // 2. Direct insert into student_document table (Every upload or re-upload creates a new row)
-      if (stuNumId) {
+      // 2. Direct insert into student_document table (Every upload or re-upload creates a new row with STU001 format)
+      if (studentCode) {
         const [insertRes] = await pool.query(`
           INSERT INTO student_document (
             Student_Id, Entry_date, File_Name, Document_Id, Document_Name, Image, Description, DeleteStatus
           ) VALUES (?, CURDATE(), ?, ?, ?, ?, ?, 0)
         `, [
-          stuNumId,
+          studentCode,
           fileResult.fileName || doc.fileName || doc.name,
           doc.id,
           doc.name,
@@ -819,7 +832,6 @@ class DataStore {
   async deleteDocument(userId, docId, versionNumber) {
     const db = require('./db');
     const pool = db.getPool();
-    const stuNumId = parseInt((userId || '').replace(/\D/g, ''), 10) || null;
     const numericDocId = parseInt(docId, 10);
 
     // 1. Always refresh from MySQL first so we operate on real database state
@@ -831,6 +843,9 @@ class DataStore {
 
     const user = this.findUserById(userId);
     if (!user) throw new Error("User not found");
+
+    const studentCode = user.studentCode || (userId && userId.includes('STU') ? userId.replace(/^u-/, '') : `STU${String((userId || '').replace(/\D/g, '') || 1).padStart(3, '0')}`);
+    const legacyNumId = parseInt((userId || '').replace(/\D/g, ''), 10) || null;
 
     const docIndex = (user.documents || []).findIndex(d => d.id === numericDocId);
     if (docIndex === -1) throw new Error("Document not found");
@@ -855,11 +870,11 @@ class DataStore {
       }
 
       // If studentDocumentId is not mapped in memory, lookup the exact active row in MySQL
-      if (!targetStudentDocId && pool && stuNumId) {
+      if (!targetStudentDocId && pool) {
         try {
           const [activeRows] = await pool.query(
-            'SELECT Student_Document_Id FROM student_document WHERE Student_Id = ? AND Document_Id = ? AND (DeleteStatus = 0 OR DeleteStatus IS NULL) ORDER BY Student_Document_Id ASC',
-            [stuNumId, numericDocId]
+            'SELECT Student_Document_Id FROM student_document WHERE (Student_Id = ? OR Student_Id = ?) AND Document_Id = ? AND (DeleteStatus = 0 OR DeleteStatus IS NULL) ORDER BY Student_Document_Id ASC',
+            [studentCode, legacyNumId ? String(legacyNumId) : studentCode, numericDocId]
           );
           if (activeRows && activeRows[vNum - 1]) {
             targetStudentDocId = activeRows[vNum - 1].Student_Document_Id;
@@ -926,11 +941,11 @@ class DataStore {
     } else {
       // 3. Full document deletion (no version specified)
       fileIdToDelete = doc.driveFileId;
-      if (pool && stuNumId) {
+      if (pool) {
         try {
           await pool.query(
-            'UPDATE student_document SET DeleteStatus = 1 WHERE Student_Id = ? AND Document_Id = ? AND (DeleteStatus = 0 OR DeleteStatus IS NULL)',
-            [stuNumId, numericDocId]
+            'UPDATE student_document SET DeleteStatus = 1 WHERE (Student_Id = ? OR Student_Id = ?) AND Document_Id = ? AND (DeleteStatus = 0 OR DeleteStatus IS NULL)',
+            [studentCode, legacyNumId ? String(legacyNumId) : studentCode, numericDocId]
           );
         } catch (err) {
           console.error('[MySQL Full Delete Error]:', err.message);

@@ -160,7 +160,7 @@ async function initDatabase() {
       await conn.query(`
         CREATE TABLE IF NOT EXISTS student_document (
           Student_Document_Id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-          Student_Id INT DEFAULT NULL,
+          Student_Id VARCHAR(50) DEFAULT NULL,
           Entry_date DATE DEFAULT NULL,
           File_Name VARCHAR(500) DEFAULT NULL,
           Document_Id INT DEFAULT NULL,
@@ -247,7 +247,7 @@ async function seedFromDatabaseJson(conn) {
 
           if (user.role !== 'admin') {
             try {
-              const stuNumId = parseInt((user.id || '').replace(/\D/g, ''), 10) || null;
+              const stuCode = user.studentCode || (user.id && user.id.includes('STU') ? user.id.replace(/^u-/, '') : `STU${String((user.id || '').replace(/\D/g, '') || 1).padStart(3, '0')}`);
               await conn.query(`
                 INSERT INTO student (Student_Id, Student_Name, Email, Username, Password, Unique_Id, Entry_date, DeleteStatus, Is_Registered)
                 VALUES (?, ?, ?, ?, ?, ?, NOW(), 0, 1)
@@ -260,7 +260,7 @@ async function seedFromDatabaseJson(conn) {
                   DeleteStatus=0,
                   Is_Registered=1
               `, [
-                stuNumId, user.name, user.email, user.username, user.password, user.studentCode || null
+                stuCode, user.name, user.email, user.username, user.password, stuCode
               ]);
             } catch (_) {}
           }
