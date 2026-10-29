@@ -282,10 +282,12 @@ app.post('/api/auth/reset-password', async (req, res) => {
         'UPDATE student SET Password = ? WHERE LOWER(TRIM(Email)) = ? OR LOWER(TRIM(Username)) = ?',
         [newPassword, cleanEmail, cleanEmail]
       );
-      await pool.query(
-        'UPDATE users SET password = ? WHERE LOWER(TRIM(email)) = ? OR LOWER(TRIM(username)) = ?',
-        [newPassword, cleanEmail, cleanEmail]
-      );
+      try {
+        await pool.query(
+          'UPDATE users SET password = ? WHERE LOWER(TRIM(email)) = ? OR LOWER(TRIM(username)) = ?',
+          [newPassword, cleanEmail, cleanEmail]
+        );
+      } catch (_) {}
       await dataStore.loadFromMysql();
     }
   } catch (err) {
@@ -331,10 +333,12 @@ app.post('/api/auth/change-password', authenticateToken, async (req, res) => {
         'UPDATE student SET Password = ? WHERE (Student_Id IS NOT NULL AND Student_Id = ?) OR (LOWER(TRIM(Email)) = ? AND Email IS NOT NULL AND Email != "") OR (LOWER(TRIM(Username)) = ? AND Username IS NOT NULL AND Username != "")',
         [newPassword, studentCode, cleanEmail, cleanUsername]
       );
-      await pool.query(
-        'UPDATE users SET password = ? WHERE id = ? OR (student_code IS NOT NULL AND student_code = ?) OR (LOWER(TRIM(email)) = ? AND email IS NOT NULL AND email != "")',
-        [newPassword, req.user.id, studentCode, cleanEmail]
-      );
+      try {
+        await pool.query(
+          'UPDATE users SET password = ? WHERE id = ? OR (student_code IS NOT NULL AND student_code = ?) OR (LOWER(TRIM(email)) = ? AND email IS NOT NULL AND email != "")',
+          [newPassword, req.user.id, studentCode, cleanEmail]
+        );
+      } catch (_) {}
       await dataStore.loadFromMysql();
     }
   } catch (err) {

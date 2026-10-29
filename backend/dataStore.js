@@ -402,8 +402,8 @@ class DataStore {
         );
         if (stuRows && stuRows.length > 0) {
           const s = stuRows[0];
-          const expectedPass = s.Password || 'Password123';
-          const match = expectedPass === password || expectedPass.toLowerCase() === (password || '').trim().toLowerCase();
+          const expectedPass = s.Password ? String(s.Password).trim() : 'Password123';
+          const match = expectedPass === String(password).trim();
           if (!match) {
             return { error: 'Incorrect password.' };
           }
@@ -425,8 +425,8 @@ class DataStore {
           );
           if (userRows && userRows.length > 0) {
             const u = userRows[0];
-            const expectedPass = u.password;
-            const match = expectedPass === password || (expectedPass || '').toLowerCase() === (password || '').trim().toLowerCase();
+            const expectedPass = u.password ? String(u.password).trim() : '';
+            const match = expectedPass === String(password).trim();
             if (!match) {
               return { error: 'Incorrect password.' };
             }
@@ -447,9 +447,8 @@ class DataStore {
       return { error: 'Account not found. Only registered users in the database can log in.' };
     }
 
-    const exactMatch = user.password === password;
-    const caseMatch = (user.password || '').toLowerCase() === (password || '').trim().toLowerCase();
-    if (!exactMatch && !caseMatch) {
+    const match = user.password === String(password).trim();
+    if (!match) {
       return { error: 'Incorrect password.' };
     }
 
