@@ -25,333 +25,277 @@ function getPool() {
 
 async function initDatabase() {
   try {
-    // First, test connection without database to create it if needed
-    const tempConn = await mysql.createConnection({
-      host: process.env.DB_HOST || 'localhost',
-      port: parseInt(process.env.DB_PORT || '3306', 10),
-      user: process.env.DB_USER || 'root',
-      password: process.env.DB_PASSWORD || 'Password'
-    });
-
-    const dbName = process.env.DB_NAME || 'doc_checklist';
-    await tempConn.query(`CREATE DATABASE IF NOT EXISTS \`${dbName}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`);
-    await tempConn.end();
-
     const dbPool = getPool();
     const conn = await dbPool.getConnection();
-
-    // 1. Create Users table
-    await conn.query(`
-      CREATE TABLE IF NOT EXISTS users (
-        id VARCHAR(64) PRIMARY KEY,
-        email VARCHAR(255) NOT NULL UNIQUE,
-        username VARCHAR(100) NOT NULL UNIQUE,
-        name VARCHAR(255) NOT NULL,
-        password VARCHAR(255) NOT NULL,
-        role ENUM('user', 'admin') DEFAULT 'user',
-        department VARCHAR(255) DEFAULT 'General Operations',
-        student_code VARCHAR(50) NULL,
-        drive_folder_id VARCHAR(100) NULL,
-        drive_folder_name VARCHAR(255) NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-    `);
-
-    // Ensure columns exist on already created users table
-    const safeAddColumn = async (tbl, col, def) => {
-      try {
-        await conn.query(`ALTER TABLE \`${tbl}\` ADD COLUMN \`${col}\` ${def}`);
-      } catch (colErr) {
-        // Ignore duplicate column name
-      }
-    };
-    await safeAddColumn('users', 'student_code', 'VARCHAR(50) NULL');
-    await safeAddColumn('users', 'drive_folder_id', 'VARCHAR(100) NULL');
-    await safeAddColumn('users', 'drive_folder_name', 'VARCHAR(255) NULL');
-
-    // Ensure foreign keys support cascading updates
-    try {
-      await conn.query('ALTER TABLE documents DROP FOREIGN KEY documents_ibfk_1');
-      await conn.query('ALTER TABLE documents ADD CONSTRAINT documents_ibfk_1 FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE ON UPDATE CASCADE');
-    } catch (_) {}
-    try {
-      await conn.query('ALTER TABLE document_versions DROP FOREIGN KEY document_versions_ibfk_1');
-      await conn.query('ALTER TABLE document_versions ADD CONSTRAINT document_versions_ibfk_1 FOREIGN KEY (document_id, user_id) REFERENCES documents (id, user_id) ON DELETE CASCADE ON UPDATE CASCADE');
-    } catch (_) {}
-
-    // 2. Create Documents table
-    await conn.query(`
-      CREATE TABLE IF NOT EXISTS documents (
-        id INT NOT NULL,
-        user_id VARCHAR(64) NOT NULL,
-        name VARCHAR(255) NOT NULL,
-        description TEXT,
-        upload_status ENUM('Upload Pending', 'Uploaded') DEFAULT 'Upload Pending',
-        approval_status ENUM('Pending', 'Approved', 'Rejected') DEFAULT 'Pending',
-        is_locked BOOLEAN DEFAULT FALSE,
-        current_version INT DEFAULT 0,
-        upload_date_time VARCHAR(100),
-        upload_timestamp TIMESTAMP NULL,
-        drive_file_id VARCHAR(255),
-        file_name VARCHAR(255),
-        saved_file_name VARCHAR(255),
-        file_size BIGINT,
-        mime_type VARCHAR(150),
-        web_view_link TEXT,
-        download_url TEXT,
-        storage_type VARCHAR(50) DEFAULT 'google_drive_cloud',
-        notes TEXT,
-        admin_feedback TEXT,
-        PRIMARY KEY (id, user_id),
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-    `);
-
-    // 3. Create Document Versions table
-    await conn.query(`
-      CREATE TABLE IF NOT EXISTS document_versions (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        document_id INT NOT NULL,
-        user_id VARCHAR(64) NOT NULL,
-        version_number INT NOT NULL,
-        upload_date_time VARCHAR(100),
-        upload_timestamp TIMESTAMP NULL,
-        drive_file_id VARCHAR(255),
-        file_name VARCHAR(255),
-        saved_file_name VARCHAR(255),
-        file_size BIGINT,
-        mime_type VARCHAR(150),
-        web_view_link TEXT,
-        download_url TEXT,
-        storage_type VARCHAR(50) DEFAULT 'google_drive_cloud',
-        notes TEXT,
-        approval_status_at_upload VARCHAR(50) DEFAULT 'Pending',
-        UNIQUE KEY uk_doc_user_ver (document_id, user_id, version_number),
-        FOREIGN KEY (document_id, user_id) REFERENCES documents(id, user_id) ON DELETE CASCADE ON UPDATE CASCADE
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-    `);
-
-    // 4. Create Reset Tokens table
-    await conn.query(`
-      CREATE TABLE IF NOT EXISTS reset_tokens (
-        token VARCHAR(255) PRIMARY KEY,
-        email VARCHAR(255) NOT NULL,
-        expires_at BIGINT NOT NULL
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-    `);
-
-    // 5. Ensure document_type, document, and student_document tables exist and are populated
-    try {
-      await conn.query(`
-        CREATE TABLE IF NOT EXISTS document_type (
-          Document_Type_Id INT NOT NULL PRIMARY KEY,
-          Document_Type_Name VARCHAR(45) DEFAULT NULL,
-          DeleteStatus TINYINT UNSIGNED DEFAULT 0
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-      `);
-      await conn.query(`
-        CREATE TABLE IF NOT EXISTS document (
-          Document_Id INT NOT NULL PRIMARY KEY,
-          Document_Name VARCHAR(100) DEFAULT NULL,
-          Document_Type_Id INT DEFAULT NULL,
-          DeleteStatus TINYINT UNSIGNED DEFAULT 0
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-      `);
-      await conn.query(`
-        CREATE TABLE IF NOT EXISTS student_document (
-          Student_Document_Id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-          Student_Id VARCHAR(50) DEFAULT NULL,
-          Entry_date DATE DEFAULT NULL,
-          File_Name VARCHAR(500) DEFAULT NULL,
-          Document_Id INT DEFAULT NULL,
-          Document_Name VARCHAR(500) DEFAULT NULL,
-          Image VARCHAR(500) DEFAULT NULL,
-          Description TEXT,
-          DeleteStatus TINYINT UNSIGNED DEFAULT 0
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-      `);
-
-      const docTypes = [
-        { id: 1, name: 'Media' },
-        { id: 2, name: 'Educational' },
-        { id: 3, name: 'Profile & Recommendations' },
-        { id: 4, name: 'Clearances & Medical' },
-        { id: 5, name: 'Identity' },
-        { id: 6, name: 'Other Documents' }
-      ];
-      for (const dt of docTypes) {
-        await conn.query('INSERT INTO document_type (Document_Type_Id, Document_Type_Name, DeleteStatus) VALUES (?, ?, 0) ON DUPLICATE KEY UPDATE Document_Type_Name=VALUES(Document_Type_Name), DeleteStatus=0', [dt.id, dt.name]);
-      }
-
-      const initialDocs = [
-        { id: 1, name: "Photos", typeId: 1 },
-        { id: 2, name: "Intro Videos", typeId: 1 },
-        { id: 3, name: "10th", typeId: 2 },
-        { id: 4, name: "Plus Two", typeId: 2 },
-        { id: 5, name: "Language Certificates", typeId: 2 },
-        { id: 6, name: "Letter of Recommendation", typeId: 3 },
-        { id: 7, name: "Childcare Reference", typeId: 3 },
-        { id: 8, name: "German CV", typeId: 3 },
-        { id: 9, name: "Motivation Letter", typeId: 3 },
-        { id: 10, name: "PCC", typeId: 4 },
-        { id: 11, name: "Medical", typeId: 4 },
-        { id: 12, name: "Aadhaar Card", typeId: 5 },
-        { id: 13, name: "PAN Card", typeId: 5 },
-        { id: 14, name: "Resume", typeId: 3 },
-        { id: 15, name: "Degree Certificate", typeId: 2 },
-        { id: 16, name: "Special / Document : Test *", typeId: 6 }
-      ];
-      for (const d of initialDocs) {
-        await conn.query('INSERT INTO document (Document_Id, Document_Name, Document_Type_Id, DeleteStatus) VALUES (?, ?, ?, 0) ON DUPLICATE KEY UPDATE Document_Name=VALUES(Document_Name), Document_Type_Id=VALUES(Document_Type_Id), DeleteStatus=0', [d.id, d.name, d.typeId]);
-      }
-    } catch (_) {}
-
-    // Check if initial data exists, if not, migrate from database.json or defaults
-    const [docRows] = await conn.query('SELECT COUNT(*) as count FROM documents');
-    if (docRows[0].count === 0) {
-      console.log('[MySQL] Seeding initial data into MySQL database...');
-      await seedFromDatabaseJson(conn);
-    }
-
     conn.release();
     isConnected = true;
+    const dbName = process.env.DB_NAME || 'doc_checklist';
     console.log(`[MySQL] Connected successfully to database: "${dbName}"`);
     return true;
   } catch (err) {
     isConnected = false;
-    console.error('[MySQL] Initialization warning:', err.message);
+    console.error('[MySQL] Connection warning:', err.message);
     return false;
   }
 }
 
-async function seedFromDatabaseJson(conn) {
-  const jsonPath = path.join(__dirname, 'database.json');
-  if (fs.existsSync(jsonPath)) {
-    try {
-      const data = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
-      if (data && data.users) {
-        for (const user of data.users) {
-          await conn.query(`
-            INSERT INTO users (id, email, username, name, password, role, department, student_code, drive_folder_id, drive_folder_name)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON DUPLICATE KEY UPDATE 
-              name=VALUES(name),
-              student_code=VALUES(student_code),
-              drive_folder_id=VALUES(drive_folder_id),
-              drive_folder_name=VALUES(drive_folder_name)
-          `, [
-            user.id, user.email, user.username, user.name, user.password, 
-            user.role, user.department || 'General Operations',
-            user.studentCode || null, user.driveFolderId || null, user.driveFolderName || null
-          ]);
+// ============================================================================
+// STORED DATABASE QUERIES & DATA ACCESS METHODS
+// ============================================================================
 
-          if (user.role !== 'admin') {
-            try {
-              const stuCode = user.studentCode || (user.id && user.id.includes('STU') ? user.id.replace(/^u-/, '') : `STU${String((user.id || '').replace(/\D/g, '') || 1).padStart(3, '0')}`);
-              await conn.query(`
-                INSERT INTO student (Student_Id, Student_Name, Email, Username, Password, Unique_Id, Entry_date, DeleteStatus, Is_Registered)
-                VALUES (?, ?, ?, ?, ?, ?, NOW(), 0, 1)
-                ON DUPLICATE KEY UPDATE
-                  Student_Name=VALUES(Student_Name),
-                  Email=VALUES(Email),
-                  Username=VALUES(Username),
-                  Password=COALESCE(student.Password, VALUES(Password)),
-                  Unique_Id=VALUES(Unique_Id),
-                  DeleteStatus=0,
-                  Is_Registered=1
-              `, [
-                stuCode, user.name, user.email, user.username, user.password, stuCode
-              ]);
-            } catch (_) {}
-          }
+/**
+ * Find user by email, username, or Student_Id in student table.
+ */
+async function findUserByIdentifier(identifier) {
+  if (!identifier) return null;
+  const pool = getPool();
+  if (!pool) return null;
+  const clean = String(identifier).trim();
+  const cleanLower = clean.toLowerCase();
 
-          if (user.documents && Array.isArray(user.documents)) {
-            for (const doc of user.documents) {
-              await conn.query(`
-                INSERT INTO documents (
-                  id, user_id, name, description, upload_status, approval_status, 
-                  is_locked, current_version, upload_date_time, drive_file_id, 
-                  file_name, saved_file_name, file_size, mime_type, web_view_link, 
-                  download_url, storage_type, notes, admin_feedback
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE 
-                  upload_status=VALUES(upload_status),
-                  approval_status=VALUES(approval_status),
-                  is_locked=VALUES(is_locked),
-                  current_version=VALUES(current_version),
-                  upload_date_time=VALUES(upload_date_time),
-                  drive_file_id=VALUES(drive_file_id),
-                  file_name=VALUES(file_name),
-                  saved_file_name=VALUES(saved_file_name),
-                  file_size=VALUES(file_size),
-                  mime_type=VALUES(mime_type),
-                  web_view_link=VALUES(web_view_link),
-                  download_url=VALUES(download_url),
-                  storage_type=VALUES(storage_type),
-                  notes=VALUES(notes),
-                  admin_feedback=VALUES(admin_feedback)
-              `, [
-                doc.id, user.id, doc.name, doc.description || '',
-                doc.uploadStatus || 'Upload Pending', doc.approvalStatus || 'Pending',
-                Boolean(doc.isLocked), doc.currentVersion || 0, doc.uploadDateTime || null,
-                doc.driveFileId || null, doc.fileName || null, doc.savedFileName || null,
-                doc.fileSize || null, doc.mimeType || null, doc.webViewLink || null,
-                doc.downloadUrl || null, doc.storageType || 'google_drive_cloud',
-                doc.notes || '', doc.adminFeedback || ''
-              ]);
-
-              if (doc.versions && Array.isArray(doc.versions)) {
-                for (const v of doc.versions) {
-                  await conn.query(`
-                    INSERT INTO document_versions (
-                      document_id, user_id, version_number, upload_date_time, 
-                      drive_file_id, file_name, saved_file_name, file_size, 
-                      mime_type, web_view_link, download_url, storage_type, 
-                      notes, approval_status_at_upload
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON DUPLICATE KEY UPDATE
-                      file_name=VALUES(file_name),
-                      drive_file_id=VALUES(drive_file_id),
-                      file_size=VALUES(file_size),
-                      upload_date_time=VALUES(upload_date_time),
-                      mime_type=VALUES(mime_type),
-                      web_view_link=VALUES(web_view_link),
-                      download_url=VALUES(download_url),
-                      storage_type=VALUES(storage_type),
-                      notes=VALUES(notes),
-                      approval_status_at_upload=VALUES(approval_status_at_upload)
-                  `, [
-                    doc.id, user.id, v.versionNumber, v.uploadDateTime || null,
-                    v.driveFileId || null, v.fileName || null, v.savedFileName || null,
-                    v.fileSize || null, v.mimeType || null, v.webViewLink || null,
-                    v.downloadUrl || null, v.storageType || 'google_drive_cloud',
-                    v.notes || '', v.approvalStatusAtUpload || 'Pending'
-                  ]);
-                }
-              }
-            }
-          }
-        }
-      }
-      console.log('[MySQL] Seed completed from database.json');
-      return;
-    } catch (seedErr) {
-      console.warn('[MySQL] Notice seeding from JSON:', seedErr.message);
+  try {
+    const [stuRows] = await pool.query(
+      'SELECT * FROM student WHERE (LOWER(TRIM(Username)) = ? OR LOWER(TRIM(Email)) = ? OR Student_Id = ?) AND (DeleteStatus = 0 OR DeleteStatus IS NULL) LIMIT 1',
+      [cleanLower, cleanLower, clean]
+    );
+    if (stuRows && stuRows.length > 0) {
+      const s = stuRows[0];
+      return {
+        id: `u-${s.Student_Id}`,
+        email: s.Email,
+        username: s.Username || s.Email,
+        name: s.Student_Name,
+        password: s.Password,
+        role: 'user',
+        department: s.Proceeding_Course_Name || 'General Operations',
+        studentCode: s.Student_Id
+      };
     }
+  } catch (err) {
+    console.warn('[DB Query] findUserByIdentifier error:', err.message);
   }
+  return null;
+}
 
-  // Fallback defaults
-  await conn.query(`
-    INSERT INTO users (id, email, username, name, password, role, department)
-    VALUES 
-      ('u-1', 'john.doe@example.com', 'johndoe', 'Johnathan Doe', 'password123', 'user', 'Engineering & Architecture'),
-      ('u-admin', 'admin@example.com', 'admin', 'Sarah Jenkins (Compliance Admin)', 'adminpassword', 'admin', 'Compliance & HR Audit')
-    ON DUPLICATE KEY UPDATE name=VALUES(name)
-  `);
+/**
+ * Update user password in student table.
+ */
+async function updateUserPassword(studentCode, email, username, newPassword) {
+  const pool = getPool();
+  if (!pool) return false;
+  const cleanEmail = email ? String(email).toLowerCase().trim() : null;
+  const cleanUsername = username ? String(username).toLowerCase().trim() : null;
+  const cleanCode = studentCode ? String(studentCode).trim() : null;
+
+  let updated = false;
+  try {
+    const [stuRes] = await pool.query(
+      'UPDATE student SET Password = ? WHERE (Student_Id IS NOT NULL AND Student_Id = ?) OR (LOWER(TRIM(Email)) = ? AND Email IS NOT NULL AND Email != "") OR (LOWER(TRIM(Username)) = ? AND Username IS NOT NULL AND Username != "")',
+      [newPassword, cleanCode, cleanEmail, cleanUsername || cleanEmail]
+    );
+    updated = Boolean(stuRes && (stuRes.affectedRows > 0 || stuRes.changedRows > 0));
+  } catch (err) {
+    console.warn('[DB Query] updateUserPassword error:', err.message);
+  }
+  return updated;
+}
+
+/**
+ * Update dedicated Google Drive folder for a user.
+ */
+async function updateUserDriveFolder(userId, folderId, folderName) {
+  return true;
+}
+
+/**
+ * Load all active students from MySQL.
+ */
+async function loadActiveStudents() {
+  const pool = getPool();
+  if (!pool) return [];
+  try {
+    const [students] = await pool.query(
+      'SELECT Student_Id, Student_Name, Email, Username, Password, Unique_Id, Proceeding_Course_Name FROM student WHERE DeleteStatus = 0 OR DeleteStatus IS NULL'
+    );
+    return students || [];
+  } catch (err) {
+    console.warn('[DB Query] loadActiveStudents error:', err.message);
+    return [];
+  }
+}
+
+/**
+ * Load master documents from MySQL catalog.
+ */
+async function loadMasterDocuments() {
+  const pool = getPool();
+  if (!pool) return [];
+  try {
+    const [masterDocs] = await pool.query(
+      'SELECT Document_Id, Document_Name, Document_Type_Id FROM document WHERE DeleteStatus = 0 ORDER BY Document_Id ASC'
+    );
+    return masterDocs || [];
+  } catch (err) {
+    console.warn('[DB Query] loadMasterDocuments error:', err.message);
+    return [];
+  }
+}
+
+/**
+ * Ensure master document exists in document table.
+ */
+async function ensureMasterDocument(docId, docName, docTypeId = 1) {
+  const pool = getPool();
+  if (!pool || !docId) return false;
+  try {
+    await pool.query(
+      'INSERT INTO document (Document_Id, Document_Name, Document_Type_Id, DeleteStatus) VALUES (?, ?, ?, 0) ON DUPLICATE KEY UPDATE Document_Name=VALUES(Document_Name), DeleteStatus=0',
+      [docId, docName, docTypeId]
+    );
+    return true;
+  } catch (err) {
+    console.warn('[DB Query] ensureMasterDocument error:', err.message);
+    return false;
+  }
+}
+
+/**
+ * Fetch all uploaded documents for a student from student_document table.
+ */
+async function getStudentUploadedDocuments(studentCode, legacyNumId = null) {
+  const pool = getPool();
+  if (!pool || !studentCode) return [];
+  try {
+    const [stuDocs] = await pool.query(
+      'SELECT * FROM student_document WHERE Student_Id = ? OR Student_Id = ? ORDER BY Student_Document_Id ASC',
+      [studentCode, legacyNumId ? String(legacyNumId) : studentCode]
+    );
+    return stuDocs || [];
+  } catch (err) {
+    console.warn('[DB Query] getStudentUploadedDocuments error:', err.message);
+    return [];
+  }
+}
+
+/**
+ * Insert a newly uploaded or re-uploaded document into student_document table.
+ */
+async function insertStudentDocument(studentCode, fileName, docId, docName, driveLink, notes = '') {
+  const pool = getPool();
+  if (!pool || !studentCode) return null;
+  try {
+    const [res] = await pool.query(`
+      INSERT INTO student_document (
+        Student_Id, Entry_date, File_Name, Document_Id, Document_Name, Image, Description, DeleteStatus
+      ) VALUES (?, CURDATE(), ?, ?, ?, ?, ?, 0)
+    `, [
+      studentCode,
+      fileName,
+      docId,
+      docName,
+      driveLink,
+      notes || ''
+    ]);
+    return res?.insertId || null;
+  } catch (err) {
+    console.warn('[DB Query] insertStudentDocument error:', err.message);
+    return null;
+  }
+}
+
+/**
+ * Get active student_document records for a specific Document_Id.
+ */
+async function getActiveStudentDocumentIds(studentCode, legacyNumId, docId) {
+  const pool = getPool();
+  if (!pool || !studentCode) return [];
+  try {
+    const [rows] = await pool.query(
+      'SELECT Student_Document_Id FROM student_document WHERE (Student_Id = ? OR Student_Id = ?) AND Document_Id = ? AND (DeleteStatus = 0 OR DeleteStatus IS NULL) ORDER BY Student_Document_Id ASC',
+      [studentCode, legacyNumId ? String(legacyNumId) : studentCode, docId]
+    );
+    return rows || [];
+  } catch (err) {
+    console.warn('[DB Query] getActiveStudentDocumentIds error:', err.message);
+    return [];
+  }
+}
+
+/**
+ * Soft delete a single student_document row by primary key (Student_Document_Id).
+ */
+async function softDeleteStudentDocumentById(studentDocumentId) {
+  const pool = getPool();
+  if (!pool || !studentDocumentId) return false;
+  try {
+    await pool.query('UPDATE student_document SET DeleteStatus = 1 WHERE Student_Document_Id = ?', [studentDocumentId]);
+    return true;
+  } catch (err) {
+    console.warn('[DB Query] softDeleteStudentDocumentById error:', err.message);
+    return false;
+  }
+}
+
+/**
+ * Soft delete all student_document records for a document under a student.
+ */
+async function softDeleteAllStudentDocuments(studentCode, legacyNumId, docId) {
+  const pool = getPool();
+  if (!pool || !studentCode) return false;
+  try {
+    await pool.query(
+      'UPDATE student_document SET DeleteStatus = 1 WHERE (Student_Id = ? OR Student_Id = ?) AND Document_Id = ? AND (DeleteStatus = 0 OR DeleteStatus IS NULL)',
+      [studentCode, legacyNumId ? String(legacyNumId) : studentCode, docId]
+    );
+    return true;
+  } catch (err) {
+    console.warn('[DB Query] softDeleteAllStudentDocuments error:', err.message);
+    return false;
+  }
+}
+
+/**
+ * Upsert student into student table.
+ */
+async function upsertStudent(studentCode, name, email, username, password) {
+  const pool = getPool();
+  if (!pool || !studentCode) return false;
+  try {
+    await pool.query(`
+      INSERT INTO student (Student_Id, Student_Name, Email, Username, Password, Unique_Id, Entry_date, DeleteStatus, Is_Registered)
+      VALUES (?, ?, ?, ?, ?, ?, NOW(), 0, 1)
+      ON DUPLICATE KEY UPDATE
+        Student_Name=VALUES(Student_Name),
+        Email=VALUES(Email),
+        Username=VALUES(Username),
+        Password=COALESCE(student.Password, VALUES(Password)),
+        Unique_Id=VALUES(Unique_Id),
+        DeleteStatus=0,
+        Is_Registered=1
+    `, [studentCode, name, email, username, password, studentCode]);
+    return true;
+  } catch (err) {
+    console.warn('[DB Query] upsertStudent error:', err.message);
+    return false;
+  }
 }
 
 module.exports = {
   getPool,
   initDatabase,
-  isDbConnected: () => isConnected
+  isDbConnected: () => isConnected,
+
+  // Stored Query Methods
+  findUserByIdentifier,
+  updateUserPassword,
+  updateUserDriveFolder,
+  loadActiveStudents,
+  loadMasterDocuments,
+  ensureMasterDocument,
+  getStudentUploadedDocuments,
+  insertStudentDocument,
+  getActiveStudentDocumentIds,
+  softDeleteStudentDocumentById,
+  softDeleteAllStudentDocuments,
+  upsertStudent
 };

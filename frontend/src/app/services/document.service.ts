@@ -4,8 +4,9 @@ import { Observable, of } from 'rxjs';
 import { map, catchError } from 'rxjs/operators';
 import { ChecklistResponse, DocumentItem, DocumentVersion, DriveStatus } from '../models/document.model';
 import { AuthService } from './auth.service';
+import { environment } from '../../environments/environment';
 
-const API_URL = (typeof window !== 'undefined' && window.location.port === '4200') ? 'http://localhost:5000/api' : '/api';
+const API_URL = environment.apiUrl;
 
 const INITIAL_DOCUMENTS: Array<{ id: number; name: string; description: string }> = [
   { id: 1, name: "Photos", description: "Recent passport-size and profile photographs" },

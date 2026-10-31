@@ -6,12 +6,12 @@ import { DocumentService } from '../../services/document.service';
 import { AuthService } from '../../services/auth.service';
 import { NotificationService } from '../../services/notification.service';
 import { DocumentItem, ChecklistResponse } from '../../models/document.model';
+import { environment } from '../../../environments/environment';
 
 function getBackendUrl(path: string): string {
   if (!path) return '';
   if (path.startsWith('http://') || path.startsWith('https://')) return path;
-  const isDevPort = typeof window !== 'undefined' && window.location.port === '4200';
-  const base = isDevPort ? 'http://localhost:5000' : '';
+  const base = environment.backendUrl.replace(/\/$/, '');
   const cleanPath = path.startsWith('/') ? path : '/' + path;
   return `${base}${cleanPath}`;
 }

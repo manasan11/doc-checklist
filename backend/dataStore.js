@@ -1,8 +1,6 @@
 const fs = require('fs');
 const path = require('path');
 
-const DB_FILE = path.join(__dirname, 'database.json');
-
 const INITIAL_DOCUMENTS = [
   { id: 1, name: "Photos", description: "Recent passport-size and profile photographs" },
   { id: 2, name: "Intro Videos", description: "Short self-introduction video presentation" },
@@ -90,88 +88,40 @@ function getInitialData() {
 
 class DataStore {
   constructor() {
-    this.data = this.load();
+    this.data = getInitialData();
   }
 
   load() {
-    let loadedData = null;
-    if (fs.existsSync(DB_FILE)) {
-      try {
-        const content = fs.readFileSync(DB_FILE, 'utf8');
-        loadedData = JSON.parse(content);
-      } catch (e) {
-        console.error('Error reading db, using defaults:', e);
-      }
+    if (!this.data) {
+      this.data = getInitialData();
     }
-    if (!loadedData) {
-      loadedData = getInitialData();
-    }
-
-    // Ensure student codes are assigned for all non-admin students
-    let modified = false;
-    if (loadedData && loadedData.users) {
-      for (const u of loadedData.users) {
-        if (u.role !== 'admin' && !u.studentCode) {
-          this.ensureStudentCode(u, loadedData.users);
-          modified = true;
-        }
-      }
-    }
-    if (modified) {
-      try {
-        fs.writeFileSync(DB_FILE, JSON.stringify(loadedData, null, 2), 'utf8');
-      } catch (_) {}
-    }
-    return loadedData;
+    return this.data;
   }
 
   save(dataToSave) {
-    const data = dataToSave || this.data;
-    try {
-      fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), 'utf8');
-    } catch (e) {
-      console.error('Error saving db:', e);
+    if (dataToSave) {
+      this.data = dataToSave;
     }
-    this.syncToMysql(data).catch(() => {});
+    this.syncToMysql(this.data).catch(() => {});
   }
 
   async syncToMysql(dataToSave) {
     const data = dataToSave || this.data;
     try {
       const db = require('./db');
-      const pool = db.getPool();
-      if (!pool) return;
 
       for (const user of (data.users || [])) {
         if (user.role !== 'admin') {
           try {
             const studentCode = user.studentCode || (user.id && user.id.includes('STU') ? user.id.replace(/^u-/, '') : `STU${String((user.id || '').replace(/\D/g, '') || 1).padStart(3, '0')}`);
-            await pool.query(`
-              INSERT INTO student (Student_Id, Student_Name, Email, Username, Password, Unique_Id, Entry_date, DeleteStatus, Is_Registered)
-              VALUES (?, ?, ?, ?, ?, ?, NOW(), 0, 1)
-              ON DUPLICATE KEY UPDATE
-                Student_Name=VALUES(Student_Name),
-                Email=VALUES(Email),
-                Username=VALUES(Username),
-                Password=COALESCE(student.Password, VALUES(Password)),
-                Unique_Id=VALUES(Unique_Id),
-                DeleteStatus=0,
-                Is_Registered=1
-            `, [
-              studentCode, user.name, user.email, user.username, user.password, studentCode
-            ]);
+            await db.upsertStudent(studentCode, user.name, user.email, user.username, user.password);
           } catch (_) {}
         }
 
         if (user.documents && Array.isArray(user.documents)) {
           for (const doc of user.documents) {
-            // Ensure document is registered in master `document` table
             try {
-              await pool.query(`
-                INSERT INTO document (Document_Id, Document_Name, Document_Type_Id, DeleteStatus)
-                VALUES (?, ?, 1, 0)
-                ON DUPLICATE KEY UPDATE Document_Name=VALUES(Document_Name), DeleteStatus=0
-              `, [doc.id, doc.name]);
+              await db.ensureMasterDocument(doc.id, doc.name);
             } catch (_) {}
           }
         }
@@ -184,19 +134,13 @@ class DataStore {
   async loadFromMysql() {
     try {
       const db = require('./db');
-      const pool = db.getPool();
-      if (!pool) return null;
 
-      // 1. Load active students from MySQL student table
-      const [students] = await pool.query(
-        'SELECT Student_Id, Student_Name, Email, Username, Password, Unique_Id, Proceeding_Course_Name FROM student WHERE DeleteStatus = 0 OR DeleteStatus IS NULL'
-      );
+      // 1. Load active students from MySQL student table via stored query in db.js
+      const students = await db.loadActiveStudents();
       if (!students || students.length === 0) return null;
 
-      // 2. Load master checklist template from document table
-      let [masterDocs] = await pool.query(
-        'SELECT Document_Id, Document_Name, Document_Type_Id FROM document WHERE DeleteStatus = 0 ORDER BY Document_Id ASC'
-      );
+      // 2. Load master checklist template from document table via stored query in db.js
+      let masterDocs = await db.loadMasterDocuments();
       if (!masterDocs || masterDocs.length === 0) {
         masterDocs = INITIAL_DOCUMENTS.map(d => ({ Document_Id: d.id, Document_Name: d.name }));
       }
@@ -247,11 +191,8 @@ class DataStore {
         const numPart = (studentCode || '').replace(/\D/g, '');
         const legacyNumId = numPart ? parseInt(numPart, 10) : null;
 
-        // Get this student's uploaded documents (in chronological order) - supports both STU001 and legacy numeric ID
-        const [stuDocs] = await pool.query(
-          'SELECT * FROM student_document WHERE Student_Id = ? OR Student_Id = ? ORDER BY Student_Document_Id ASC',
-          [studentCode, legacyNumId ? String(legacyNumId) : studentCode]
-        );
+        // Get this student's uploaded documents via stored query in db.js
+        const stuDocs = await db.getStudentUploadedDocuments(studentCode, legacyNumId);
 
         // Group student_document rows by Document_Id to support all re-uploaded files / versions
         const docsByDocId = new Map();
@@ -361,9 +302,6 @@ class DataStore {
       }
 
       this.data.users = loadedUsers;
-      try {
-        fs.writeFileSync(DB_FILE, JSON.stringify(this.data, null, 2), 'utf8');
-      } catch (_) {}
       return this.data;
     } catch (err) {
       console.error('[MySQL Load Notice]:', err.message);
@@ -417,22 +355,16 @@ class DataStore {
           };
         }
 
-        // 1b. Check users table (e.g. for admin logins)
-        try {
-          const [userRows] = await pool.query(
-            'SELECT * FROM users WHERE LOWER(TRIM(username)) = ? OR LOWER(TRIM(email)) = ?',
-            [cleanLower, cleanLower]
-          );
-          if (userRows && userRows.length > 0) {
-            const u = userRows[0];
-            const expectedPass = u.password ? String(u.password).trim() : '';
-            const match = expectedPass === String(password).trim();
-            if (!match) {
-              return { error: 'Incorrect password.' };
-            }
-            return this.findUserById(u.id) || u;
+        // 1b. Check administrator login
+        const adminUser = (this.data.users || []).find(u => u.role === 'admin' && (u.username.toLowerCase() === cleanLower || u.email.toLowerCase() === cleanLower));
+        if (adminUser) {
+          const expectedPass = adminUser.password ? String(adminUser.password).trim() : 'adminpassword';
+          const match = expectedPass === String(password).trim();
+          if (!match) {
+            return { error: 'Incorrect password.' };
           }
-        } catch (_) {}
+          return adminUser;
+        }
 
         return { error: 'Account not found. Only registered users in the database can log in.' };
       }
@@ -805,35 +737,24 @@ class DataStore {
   async syncSingleUploadToMysql(userId, doc, fileResult, userNotes = "") {
     try {
       const db = require('./db');
-      const pool = db.getPool();
-      if (!pool) return null;
 
       const user = this.findUserById(userId);
       const studentCode = user?.studentCode || (userId && userId.includes('STU') ? userId.replace(/^u-/, '') : `STU${String((userId || '').replace(/\D/g, '') || 1).padStart(3, '0')}`);
       const directDriveLink = toGoogleDriveViewUrl(fileResult.driveWebViewLink || fileResult.webViewLink, fileResult.driveFileId);
 
-      // 1. Ensure master document catalog has this document
-      await pool.query(`
-        INSERT INTO document (Document_Id, Document_Name, Document_Type_Id, DeleteStatus)
-        VALUES (?, ?, 1, 0)
-        ON DUPLICATE KEY UPDATE Document_Name=VALUES(Document_Name), DeleteStatus=0
-      `, [doc.id, doc.name]);
+      // 1. Ensure master document catalog has this document via stored query in db.js
+      await db.ensureMasterDocument(doc.id, doc.name);
 
-      // 2. Direct insert into student_document table (Every upload or re-upload creates a new row with STU001 format and direct Google Drive URL)
+      // 2. Direct insert into student_document table via stored query in db.js
       if (studentCode) {
-        const [insertRes] = await pool.query(`
-          INSERT INTO student_document (
-            Student_Id, Entry_date, File_Name, Document_Id, Document_Name, Image, Description, DeleteStatus
-          ) VALUES (?, CURDATE(), ?, ?, ?, ?, ?, 0)
-        `, [
+        return await db.insertStudentDocument(
           studentCode,
           fileResult.fileName || doc.fileName || doc.name,
           doc.id,
           doc.name,
           directDriveLink,
           userNotes || doc.notes || ''
-        ]);
-        return insertRes?.insertId || null;
+        );
       }
       return null;
     } catch (err) {
@@ -903,13 +824,10 @@ class DataStore {
         targetStudentDocId = verRecord.studentDocumentId;
       }
 
-      // If studentDocumentId is not mapped in memory, lookup the exact active row in MySQL
-      if (!targetStudentDocId && pool) {
+      // If studentDocumentId is not mapped in memory, lookup the exact active row in MySQL via stored query
+      if (!targetStudentDocId) {
         try {
-          const [activeRows] = await pool.query(
-            'SELECT Student_Document_Id FROM student_document WHERE (Student_Id = ? OR Student_Id = ?) AND Document_Id = ? AND (DeleteStatus = 0 OR DeleteStatus IS NULL) ORDER BY Student_Document_Id ASC',
-            [studentCode, legacyNumId ? String(legacyNumId) : studentCode, numericDocId]
-          );
+          const activeRows = await db.getActiveStudentDocumentIds(studentCode, legacyNumId, numericDocId);
           if (activeRows && activeRows[vNum - 1]) {
             targetStudentDocId = activeRows[vNum - 1].Student_Document_Id;
           }
@@ -918,13 +836,10 @@ class DataStore {
         }
       }
 
-      // SOFT-DELETE ONLY THAT ONE SPECIFIC ROW IN MySQL (DeleteStatus = 1)
-      if (targetStudentDocId && pool) {
+      // SOFT-DELETE ONLY THAT ONE SPECIFIC ROW IN MySQL (DeleteStatus = 1) via stored query
+      if (targetStudentDocId) {
         try {
-          await pool.query(
-            'UPDATE student_document SET DeleteStatus = 1 WHERE Student_Document_Id = ?',
-            [targetStudentDocId]
-          );
+          await db.softDeleteStudentDocumentById(targetStudentDocId);
         } catch (err) {
           console.error('[MySQL Single Row Soft-Delete Error]:', err.message);
         }
@@ -973,17 +888,12 @@ class DataStore {
         doc.versions = [];
       }
     } else {
-      // 3. Full document deletion (no version specified)
+      // 3. Full document deletion (no version specified) via stored query in db.js
       fileIdToDelete = doc.driveFileId;
-      if (pool) {
-        try {
-          await pool.query(
-            'UPDATE student_document SET DeleteStatus = 1 WHERE (Student_Id = ? OR Student_Id = ?) AND Document_Id = ? AND (DeleteStatus = 0 OR DeleteStatus IS NULL)',
-            [studentCode, legacyNumId ? String(legacyNumId) : studentCode, numericDocId]
-          );
-        } catch (err) {
-          console.error('[MySQL Full Delete Error]:', err.message);
-        }
+      try {
+        await db.softDeleteAllStudentDocuments(studentCode, legacyNumId, numericDocId);
+      } catch (err) {
+        console.error('[MySQL Full Delete Error]:', err.message);
       }
       doc.uploadStatus = "Upload Pending";
       doc.approvalStatus = "Pending";
@@ -1064,6 +974,13 @@ class DataStore {
     if (!this.data.resetTokens) {
       this.data.resetTokens = {};
     }
+    // Clean up expired tokens to keep database.json lean
+    const now = Date.now();
+    for (const key of Object.keys(this.data.resetTokens)) {
+      if (!this.data.resetTokens[key]?.expiresAt || this.data.resetTokens[key].expiresAt < now) {
+        delete this.data.resetTokens[key];
+      }
+    }
     const token = Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
     this.data.resetTokens[token] = {
       email,
@@ -1096,29 +1013,12 @@ class DataStore {
     const targetUsername = (record.username || '').toLowerCase().trim();
     const studentCode = record.studentCode || (record.userId ? String(record.userId).replace(/^u-/, '') : null);
 
-    // 1. Update in MySQL student table and users table directly (Primary DB)
+    // 1. Update in MySQL student table and users table via stored query in db.js
     let mysqlUpdated = false;
     try {
       const db = require('./db');
-      const pool = db.getPool();
-      if (pool) {
-        // Update student table (Primary table for students)
-        const [stuRes] = await pool.query(
-          'UPDATE student SET Password = ? WHERE (Student_Id IS NOT NULL AND Student_Id = ?) OR (LOWER(TRIM(Email)) = ? AND Email IS NOT NULL AND Email != "") OR (LOWER(TRIM(Username)) = ? AND Username IS NOT NULL AND Username != "")',
-          [newPassword, studentCode, targetEmail, targetUsername || targetEmail]
-        );
-
-        // Also update users table if present
-        try {
-          await pool.query(
-            'UPDATE users SET password = ? WHERE (student_code IS NOT NULL AND student_code = ?) OR (id IS NOT NULL AND id = ?) OR (LOWER(TRIM(email)) = ? AND email IS NOT NULL AND email != "") OR (LOWER(TRIM(username)) = ? AND username IS NOT NULL AND username != "")',
-            [newPassword, studentCode, record.userId, targetEmail, targetUsername || targetEmail]
-          );
-        } catch (_) {}
-
-        mysqlUpdated = stuRes && (stuRes.affectedRows > 0 || stuRes.changedRows > 0);
-        console.log(`[DataStore] MySQL student password updated: studentCode=${studentCode}, email=${targetEmail}, affected=${stuRes?.affectedRows}`);
-      }
+      mysqlUpdated = await db.updateUserPassword(studentCode, targetEmail, targetUsername || targetEmail, newPassword);
+      console.log(`[DataStore] MySQL student password updated: studentCode=${studentCode}, email=${targetEmail}, updated=${mysqlUpdated}`);
     } catch (err) {
       console.warn('[DataStore] MySQL update error during password reset:', err.message);
     }
@@ -1146,13 +1046,6 @@ class DataStore {
     // Invalidate token so it cannot be used again
     delete this.data.resetTokens[token];
 
-    // Persist to JSON directly
-    try {
-      fs.writeFileSync(DB_FILE, JSON.stringify(this.data, null, 2), 'utf8');
-    } catch (e) {
-      console.error('Error saving db:', e);
-    }
-
     // Reload from MySQL so in-memory user objects reflect the new password
     try {
       await this.loadFromMysql();
@@ -1170,28 +1063,15 @@ class DataStore {
 
     user.password = newPassword;
 
-    // Update in MySQL student table
+    // Update in MySQL student table via stored query in db.js
     try {
       const db = require('./db');
-      const pool = db.getPool();
-      if (pool) {
-        const studentCode = user.studentCode || (String(userId).includes('STU') ? String(userId).replace(/^u-/, '') : null);
-        const cleanEmail = (user.email || '').toLowerCase().trim();
-        const cleanUsername = (user.username || '').toLowerCase().trim();
+      const studentCode = user.studentCode || (String(userId).includes('STU') ? String(userId).replace(/^u-/, '') : null);
+      const cleanEmail = (user.email || '').toLowerCase().trim();
+      const cleanUsername = (user.username || '').toLowerCase().trim();
 
-        const [stuRes] = await pool.query(
-          'UPDATE student SET Password = ? WHERE (Student_Id IS NOT NULL AND Student_Id = ?) OR (LOWER(TRIM(Email)) = ? AND Email IS NOT NULL AND Email != "") OR (LOWER(TRIM(Username)) = ? AND Username IS NOT NULL AND Username != "")',
-          [newPassword, studentCode, cleanEmail, cleanUsername]
-        );
-        console.log(`[DataStore] updateUserPassword: MySQL student table updated: studentCode=${studentCode}, affected=${stuRes?.affectedRows}`);
-
-        try {
-          await pool.query(
-            'UPDATE users SET password = ? WHERE id = ? OR (student_code IS NOT NULL AND student_code = ?) OR (LOWER(TRIM(email)) = ? AND email IS NOT NULL AND email != "")',
-            [newPassword, user.id, studentCode, cleanEmail]
-          );
-        } catch (_) {}
-      }
+      const updated = await db.updateUserPassword(studentCode, cleanEmail, cleanUsername, newPassword);
+      console.log(`[DataStore] updateUserPassword: MySQL student table updated: studentCode=${studentCode}, success=${updated}`);
     } catch (err) {
       console.warn('[MySQL] Error updating password in student table:', err.message);
     }

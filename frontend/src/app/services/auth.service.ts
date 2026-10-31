@@ -4,8 +4,9 @@ import { Router } from '@angular/router';
 import { Observable, of } from 'rxjs';
 import { tap, catchError } from 'rxjs/operators';
 import { User, AuthResponse, ForgotPasswordResponse } from '../models/user.model';
+import { environment } from '../../environments/environment';
 
-const API_URL = (typeof window !== 'undefined' && window.location.port === '4200') ? 'http://localhost:5000/api' : '/api';
+const API_URL = environment.apiUrl;
 
 @Injectable({
   providedIn: 'root'

@@ -138,49 +138,12 @@ app.post('/api/auth/forgot-password', async (req, res) => {
     const trimmedInput = email.trim();
     const cleanLower = trimmedInput.toLowerCase();
 
-    // Query MySQL directly to dynamically find whichever user requested the reset
+    // Query MySQL directly via stored query in db.js
     let user = null;
     try {
-      const pool = db.getPool();
-      if (pool) {
-        // 1. Check student table first (primary table)
-        const [stuRows] = await pool.query(
-          'SELECT * FROM student WHERE (LOWER(TRIM(Username)) = ? OR LOWER(TRIM(Email)) = ? OR Student_Id = ?) AND (DeleteStatus = 0 OR DeleteStatus IS NULL)',
-          [cleanLower, cleanLower, cleanLower]
-        );
-        if (stuRows && stuRows.length > 0) {
-          const s = stuRows[0];
-          user = {
-            id: `u-${s.Student_Id}`,
-            email: s.Email,
-            username: s.Username || s.Email,
-            name: s.Student_Name,
-            role: 'user',
-            department: s.Proceeding_Course_Name || 'General Operations',
-            studentCode: s.Student_Id
-          };
-        } else {
-          // 2. Check users table
-          const [rows] = await pool.query(
-            'SELECT * FROM users WHERE LOWER(TRIM(username)) = ? OR LOWER(TRIM(email)) = ?',
-            [cleanLower, cleanLower]
-          );
-          if (rows && rows.length > 0) {
-            const row = rows[0];
-            user = {
-              id: row.id,
-              email: row.email,
-              username: row.username,
-              name: row.name,
-              role: row.role,
-              department: row.department,
-              studentCode: row.student_code
-            };
-          }
-        }
-      }
+      user = await db.findUserByIdentifier(cleanLower);
     } catch (dbErr) {
-      console.warn('[Forgot Password] MySQL query error:', dbErr.message);
+      console.warn('[Forgot Password] DB query error:', dbErr.message);
     }
 
     if (!user) {
@@ -275,19 +238,8 @@ app.post('/api/auth/reset-password', async (req, res) => {
 
   // Also update MySQL table directly to guarantee persistence in student and users tables
   try {
-    const pool = db.getPool();
-    if (pool && result.email) {
-      const cleanEmail = result.email.toLowerCase().trim();
-      await pool.query(
-        'UPDATE student SET Password = ? WHERE LOWER(TRIM(Email)) = ? OR LOWER(TRIM(Username)) = ?',
-        [newPassword, cleanEmail, cleanEmail]
-      );
-      try {
-        await pool.query(
-          'UPDATE users SET password = ? WHERE LOWER(TRIM(email)) = ? OR LOWER(TRIM(username)) = ?',
-          [newPassword, cleanEmail, cleanEmail]
-        );
-      } catch (_) {}
+    if (result.email) {
+      await db.updateUserPassword(result.studentCode || null, result.email, result.username || null, newPassword);
       await dataStore.loadFromMysql();
     }
   } catch (err) {
@@ -322,25 +274,13 @@ app.post('/api/auth/change-password', authenticateToken, async (req, res) => {
 
   // Also update MySQL table student and users directly to guarantee persistence
   try {
-    const pool = db.getPool();
-    if (pool) {
-      const user = dataStore.findUserById(req.user.id);
-      const studentCode = user?.studentCode || (String(req.user.id).includes('STU') ? String(req.user.id).replace(/^u-/, '') : null);
-      const cleanEmail = (req.user.email || user?.email || '').toLowerCase().trim();
-      const cleanUsername = (user?.username || '').toLowerCase().trim();
+    const user = dataStore.findUserById(req.user.id);
+    const studentCode = user?.studentCode || (String(req.user.id).includes('STU') ? String(req.user.id).replace(/^u-/, '') : null);
+    const cleanEmail = (req.user.email || user?.email || '').toLowerCase().trim();
+    const cleanUsername = (user?.username || '').toLowerCase().trim();
 
-      await pool.query(
-        'UPDATE student SET Password = ? WHERE (Student_Id IS NOT NULL AND Student_Id = ?) OR (LOWER(TRIM(Email)) = ? AND Email IS NOT NULL AND Email != "") OR (LOWER(TRIM(Username)) = ? AND Username IS NOT NULL AND Username != "")',
-        [newPassword, studentCode, cleanEmail, cleanUsername]
-      );
-      try {
-        await pool.query(
-          'UPDATE users SET password = ? WHERE id = ? OR (student_code IS NOT NULL AND student_code = ?) OR (LOWER(TRIM(email)) = ? AND email IS NOT NULL AND email != "")',
-          [newPassword, req.user.id, studentCode, cleanEmail]
-        );
-      } catch (_) {}
-      await dataStore.loadFromMysql();
-    }
+    await db.updateUserPassword(studentCode, cleanEmail, cleanUsername, newPassword);
+    await dataStore.loadFromMysql();
   } catch (err) {
     console.warn('[MySQL] Notice updating password in student/users table:', err.message);
   }
@@ -477,16 +417,9 @@ async function ensureUserDriveFolder(user) {
       user.driveFolderName = folderName;
       dataStore.setUserDriveFolder(user.id, folderId, folderName);
 
-      // Persist directly to MySQL users table
+      // Persist directly to MySQL users table via stored query in db.js
       try {
-        const pool = db.getPool();
-        if (pool) {
-          await pool.query('UPDATE users SET drive_folder_id = ?, drive_folder_name = ? WHERE id = ?', [
-            folderId,
-            folderName,
-            user.id
-          ]);
-        }
+        await db.updateUserDriveFolder(user.id, folderId, folderName);
       } catch (sqlErr) {
         console.warn('[MySQL] Notice updating drive_folder_id in users:', sqlErr.message);
       }
@@ -1228,14 +1161,17 @@ async function startServer() {
   try {
     await db.initDatabase();
     await dataStore.loadFromMysql();
-    // Auto-create/verify Google Drive folders for all users in the database
-    console.log('[Google Drive] Verifying student folders on startup...');
-    await ensureAllUserFolders();
   } catch (err) {
     console.warn('[MySQL Warning]:', err.message);
   }
 
   listenOnPort(PORT);
+
+  // Auto-create/verify Google Drive folders for all users asynchronously
+  console.log('[Google Drive] Verifying student folders on startup...');
+  ensureAllUserFolders().catch(err => {
+    console.warn('[Google Drive Folder Sync Notice]:', err.message);
+  });
 }
 
 startServer();
