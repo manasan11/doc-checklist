@@ -5,9 +5,6 @@ const { google } = require('googleapis');
 const { Readable } = require('stream');
 
 const UPLOADS_DIR = path.join(__dirname, 'uploads');
-if (!fs.existsSync(UPLOADS_DIR)) {
-  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-}
 
 class DriveService {
   constructor() {
@@ -208,10 +205,6 @@ class DriveService {
     }
 
     // 3. Fallback / Emulated storage
-    const subfolderPath = path.join(UPLOADS_DIR, folderName);
-    if (!fs.existsSync(subfolderPath)) {
-      fs.mkdirSync(subfolderPath, { recursive: true });
-    }
     const mockFolderId = `gdrive_folder_${folderName}_${Date.now()}`;
     return {
       folderId: mockFolderId,
@@ -314,9 +307,8 @@ class DriveService {
       targetFolderId = this.folderId;
     }
     const finalFileName = targetFileName || originalname;
-    const timestamp = Date.now();
-    const safeName = `${timestamp}_${finalFileName.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
 
+    // Direct Google Drive upload (No local disk persistence)
     // 1. Try Apps Script if configured (Directly uploads into user's personal @gmail.com folder)
     if (process.env.GOOGLE_APPS_SCRIPT_URL) {
       const scriptResult = await this.uploadViaAppsScript({ 
@@ -330,6 +322,7 @@ class DriveService {
       });
       if (scriptResult) {
         scriptResult.fileName = finalFileName;
+        scriptResult.savedFileName = null;
         return scriptResult;
       }
     }
@@ -377,6 +370,7 @@ class DriveService {
         return {
           driveFileId: res.data.id,
           fileName: finalFileName,
+          savedFileName: null,
           mimeType: res.data.mimeType || mimetype,
           fileSize: Number(res.data.size) || size,
           folderId: targetFolderId,
@@ -396,22 +390,11 @@ class DriveService {
     }
 
     // Emulated Google Drive Storage fallback
-    const targetDir = studentFolderName 
-      ? path.join(UPLOADS_DIR, studentFolderName) 
-      : UPLOADS_DIR;
-    if (!fs.existsSync(targetDir)) {
-      fs.mkdirSync(targetDir, { recursive: true });
-    }
-
-    const localFilePath = path.join(targetDir, safeName);
-    fs.writeFileSync(localFilePath, buffer);
-
-    const relativeSavedName = studentFolderName ? `${studentFolderName}/${safeName}` : safeName;
     const mockDriveId = `gdrive_${Math.random().toString(36).substring(2, 11)}_${Date.now()}`;
     return {
       driveFileId: mockDriveId,
       fileName: finalFileName,
-      savedFileName: relativeSavedName,
+      savedFileName: null,
       mimeType: mimetype,
       fileSize: size,
       folderId: targetFolderId,

@@ -13,7 +13,12 @@ import { DocumentItem } from '../../models/document.model';
         <div class="modal-header">
           <div>
             <h3 class="modal-title">{{ isReupload ? 'Re-upload' : 'Upload' }} Document</h3>
-            <p class="modal-sub">{{ document.name }}</p>
+            <p class="modal-sub">
+              {{ document.name }}
+              @if (studentName) {
+                <span class="student-target-tag">({{ studentName }})</span>
+              }
+            </p>
           </div>
           <button class="btn btn-ghost btn-icon" (click)="close()">&times;</button>
         </div>
@@ -89,6 +94,17 @@ import { DocumentItem } from '../../models/document.model';
     .modal-badge { margin-bottom: 6px; }
     .modal-title { font-size: 1.35rem; font-weight: 700; color: #1C1917; margin-bottom: 2px; }
     .modal-sub { font-size: 0.88rem; color: #EA580C; font-weight: 600; margin: 0; }
+    .student-target-tag {
+      display: inline-block;
+      margin-left: 6px;
+      padding: 1px 8px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: #9A3412;
+      background: #FFEDD5;
+      border: 1px solid #FED7AA;
+      border-radius: 12px;
+    }
 
     .dropzone {
       border: 2px dashed rgba(241, 90, 36, 0.35);
@@ -207,6 +223,8 @@ import { DocumentItem } from '../../models/document.model';
 })
 export class UploadModalComponent {
   @Input({ required: true }) document!: DocumentItem;
+  @Input() studentName: string = '';
+  @Input() studentCode: string = '';
   @Input() uploading = signal<boolean>(false);
   @Output() onUpload = new EventEmitter<{ file: File; notes: string; documentType: string }>();
   @Output() onCancel = new EventEmitter<void>();

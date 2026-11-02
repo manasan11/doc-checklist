@@ -9,15 +9,17 @@ let isConnected = false;
 function getPool() {
   if (!pool) {
     pool = mysql.createPool({
-      host: process.env.DB_HOST || 'localhost',
+      host: process.env.DB_HOST || '49.13.118.79',
       port: parseInt(process.env.DB_PORT || '3306', 10),
       user: process.env.DB_USER || 'root',
-      password: process.env.DB_PASSWORD || 'Password',
-      database: process.env.DB_NAME || 'doc_checklist',
+      password: process.env.DB_PASSWORD || 'TrackB0xPa$$w0rd',
+      database: process.env.DB_NAME || 'trackbox_ysquare_db',
       waitForConnections: true,
       connectionLimit: 10,
       queueLimit: 0,
-      charset: 'utf8mb4'
+      charset: 'utf8mb4',
+      connectTimeout: 20000,
+      ssl: false
     });
   }
   return pool;
@@ -29,7 +31,7 @@ async function initDatabase() {
     const conn = await dbPool.getConnection();
     conn.release();
     isConnected = true;
-    const dbName = process.env.DB_NAME || 'doc_checklist';
+    const dbName = process.env.DB_NAME || 'trackbox_ysquare_db';
     console.log(`[MySQL] Connected successfully to database: "${dbName}"`);
     return true;
   } catch (err) {
@@ -37,6 +39,7 @@ async function initDatabase() {
     console.error('[MySQL] Connection warning:', err.message);
     return false;
   }
+
 }
 
 // ============================================================================
@@ -178,6 +181,23 @@ async function getStudentUploadedDocuments(studentCode, legacyNumId = null) {
 }
 
 /**
+ * Bulk load all active student documents in a single query for fast startup.
+ */
+async function loadAllActiveStudentDocuments() {
+  const pool = getPool();
+  if (!pool) return [];
+  try {
+    const [rows] = await pool.query(
+      'SELECT * FROM student_document WHERE DeleteStatus = 0 OR DeleteStatus IS NULL ORDER BY Student_Document_Id ASC'
+    );
+    return rows || [];
+  } catch (err) {
+    console.warn('[DB Query] loadAllActiveStudentDocuments error:', err.message);
+    return [];
+  }
+}
+
+/**
  * Insert a newly uploaded or re-uploaded document into student_document table.
  */
 async function insertStudentDocument(studentCode, fileName, docId, docName, driveLink, notes = '') {
@@ -290,6 +310,7 @@ module.exports = {
   updateUserPassword,
   updateUserDriveFolder,
   loadActiveStudents,
+  loadAllActiveStudentDocuments,
   loadMasterDocuments,
   ensureMasterDocument,
   getStudentUploadedDocuments,

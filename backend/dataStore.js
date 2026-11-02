@@ -59,19 +59,6 @@ function getInitialData() {
   return {
     users: [
       {
-        id: "u-1",
-        email: "john.doe@example.com",
-        username: "johndoe",
-        name: "Johnathan Doe",
-        studentCode: "STU001",
-        driveFolderId: null,
-        driveFolderName: null,
-        password: "password123",
-        role: "user",
-        department: "Engineering & Architecture",
-        documents: createDefaultDocuments()
-      },
-      {
         id: "u-admin",
         email: "admin@example.com",
         username: "admin",
@@ -102,33 +89,11 @@ class DataStore {
     if (dataToSave) {
       this.data = dataToSave;
     }
-    this.syncToMysql(this.data).catch(() => {});
   }
 
   async syncToMysql(dataToSave) {
-    const data = dataToSave || this.data;
-    try {
-      const db = require('./db');
-
-      for (const user of (data.users || [])) {
-        if (user.role !== 'admin') {
-          try {
-            const studentCode = user.studentCode || (user.id && user.id.includes('STU') ? user.id.replace(/^u-/, '') : `STU${String((user.id || '').replace(/\D/g, '') || 1).padStart(3, '0')}`);
-            await db.upsertStudent(studentCode, user.name, user.email, user.username, user.password);
-          } catch (_) {}
-        }
-
-        if (user.documents && Array.isArray(user.documents)) {
-          for (const doc of user.documents) {
-            try {
-              await db.ensureMasterDocument(doc.id, doc.name);
-            } catch (_) {}
-          }
-        }
-      }
-    } catch (err) {
-      // Graceful fallback
-    }
+    // No-op in live MySQL mode: document uploads are synced directly per-upload via syncSingleUploadToMysql
+    return;
   }
 
   async loadFromMysql() {
@@ -182,21 +147,35 @@ class DataStore {
         });
       }
 
-      // 3. For each student, map their checklist and uploaded files from student_document
+      // 3. Bulk fetch all active uploaded documents in ONE fast query
+      const allActiveDocs = await db.loadAllActiveStudentDocuments();
+      const docsByStudentId = new Map();
+      for (const d of allActiveDocs) {
+        const studentKey = String(d.Student_Id || '').trim();
+        if (!docsByStudentId.has(studentKey)) {
+          docsByStudentId.set(studentKey, []);
+        }
+        docsByStudentId.get(studentKey).push(d);
+      }
+
+      const existingMemUsersById = new Map(((this.data && this.data.users) || []).map(u => [u.id, u]));
+
+      // 4. For each student, map their checklist and uploaded files
       for (const s of students) {
-        const studentCode = s.Student_Id || s.Unique_Id;
+        const studentCode = String(s.Student_Id || s.Unique_Id || '').trim();
         const sid = `u-${studentCode}`;
         const userDocs = JSON.parse(JSON.stringify(defaultDocTemplates));
 
-        const numPart = (studentCode || '').replace(/\D/g, '');
+        const numPart = studentCode.replace(/\D/g, '');
         const legacyNumId = numPart ? parseInt(numPart, 10) : null;
 
-        // Get this student's uploaded documents via stored query in db.js
-        const stuDocs = await db.getStudentUploadedDocuments(studentCode, legacyNumId);
+        // Get this student's uploaded documents from in-memory map instantly
+        const stuDocs = (docsByStudentId.get(studentCode) || [])
+          .concat(legacyNumId && String(legacyNumId) !== studentCode ? (docsByStudentId.get(String(legacyNumId)) || []) : []);
 
         // Group student_document rows by Document_Id to support all re-uploaded files / versions
         const docsByDocId = new Map();
-        for (const sd of (stuDocs || [])) {
+        for (const sd of stuDocs) {
           if (!docsByDocId.has(sd.Document_Id)) {
             docsByDocId.set(sd.Document_Id, []);
           }
@@ -284,7 +263,7 @@ class DataStore {
         }
 
         // Preserve driveFolder info from existing in-memory user if available
-        const existingMemUser = (this.data && this.data.users) ? this.findUserById(sid) : null;
+        const existingMemUser = existingMemUsersById.get(sid) || null;
 
         loadedUsers.push({
           id: sid,
@@ -392,42 +371,19 @@ class DataStore {
     return this.authenticateUser(identifier, password);
   }
 
-  ensureStudentCode(user, userList = null) {
+  ensureStudentCode(user) {
     if (!user || user.role === 'admin') return null;
-    if (user.studentCode && typeof user.studentCode === 'string' && user.studentCode.startsWith('STU')) return user.studentCode;
-
-    // Fixed mappings for default known users
-    if (user.id === 'u-1' || user.email === 'john.doe@example.com' || user.username === 'johndoe') {
-      user.studentCode = 'STU001';
-      return user.studentCode;
+    if (user.studentCode) return String(user.studentCode).trim();
+    if (user.id) {
+      const code = String(user.id).replace(/^u-/, '').trim();
+      user.studentCode = code;
+      return code;
     }
-    if (user.id === 'u-2' || user.email === 'demo@example.com' || user.username === 'demo') {
-      user.studentCode = 'STU002';
-      return user.studentCode;
-    }
-    if (user.id === 'u-3' || user.username === 'manu' || (user.email && user.email.toLowerCase().includes('manasan'))) {
-      user.studentCode = 'STU003';
-      return user.studentCode;
-    }
-
-    const allUsers = userList || (this.data && this.data.users) || [];
-    const usedNumbers = new Set();
-    for (const u of allUsers) {
-      if (u !== user && u.studentCode && typeof u.studentCode === 'string' && u.studentCode.startsWith('STU')) {
-        const num = parseInt(u.studentCode.substring(3), 10);
-        if (!isNaN(num)) usedNumbers.add(num);
-      }
-    }
-    let nextNum = 1;
-    while (usedNumbers.has(nextNum)) {
-      nextNum++;
-    }
-    user.studentCode = `STU${String(nextNum).padStart(3, '0')}`;
-    return user.studentCode;
+    return 'Student';
   }
 
   getStudentFolderSlug(user) {
-    const code = this.ensureStudentCode(user) || 'STU001';
+    const code = this.ensureStudentCode(user) || 'Student';
     const rawName = user.name || user.username || 'Student';
     const cleanName = rawName
       .trim()
@@ -450,23 +406,21 @@ class DataStore {
   findUserById(userId) {
     if (!userId) return null;
     this.data = this.load();
-    const cleanId = String(userId).trim();
-    const numPart = cleanId.replace(/\D/g, '');
-    let user = this.data.users.find(u => {
-      if (u.id === cleanId) return true;
-      if (u.studentCode && (u.studentCode === cleanId || `u-${u.studentCode}` === cleanId)) return true;
-      if (numPart && u.studentCode === `STU${String(numPart).padStart(3, '0')}`) return true;
-      if (numPart && (u.id || '').replace(/\D/g, '') === numPart) return true;
-      return false;
-    });
-    if (!user) {
-      if (cleanId === 'u-1792558150978-147' || cleanId === 'u-2') {
-        user = this.data.users.find(u => u.id === 'u-2' || u.id === 'u-1792558150978-147' || u.email === 'demo@example.com');
-      } else if (cleanId === 'u-1792558257163-754' || cleanId === 'u-3') {
-        user = this.data.users.find(u => u.id === 'u-3' || u.id === 'u-1792558257163-754' || u.email === 'user@demo');
-      }
-    }
-    return user;
+    const cleanId = String(userId).trim().toLowerCase();
+    return (this.data.users || []).find(u => {
+      const uId = String(u.id || '').trim().toLowerCase();
+      const uCode = String(u.studentCode || '').trim().toLowerCase();
+      const uEmail = String(u.email || '').trim().toLowerCase();
+      const uUser = String(u.username || '').trim().toLowerCase();
+      return (
+        uId === cleanId ||
+        uCode === cleanId ||
+        `u-${uCode}` === cleanId ||
+        uId === `u-${cleanId}` ||
+        uEmail === cleanId ||
+        uUser === cleanId
+      );
+    }) || null;
   }
 
   getUserDocuments(userId) {
@@ -786,15 +740,7 @@ class DataStore {
 
   async deleteDocument(userId, docId, versionNumber) {
     const db = require('./db');
-    const pool = db.getPool();
     const numericDocId = parseInt(docId, 10);
-
-    // 1. Always refresh from MySQL first so we operate on real database state
-    if (pool) {
-      try {
-        await this.loadFromMysql();
-      } catch (_) {}
-    }
 
     const user = this.findUserById(userId);
     if (!user) throw new Error("User not found");
@@ -929,13 +875,6 @@ class DataStore {
           driveService.deleteFile(fileIdToDelete).catch(() => {});
         } catch (_) {}
       }
-    }
-
-    // Finally re-sync with MySQL so in-memory representation matches MySQL 100%
-    if (pool) {
-      try {
-        await this.loadFromMysql();
-      } catch (_) {}
     }
 
     return this.getDocumentById(userId, numericDocId);

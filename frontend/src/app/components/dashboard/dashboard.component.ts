@@ -1,4 +1,4 @@
-import { Component, inject, signal, OnInit } from '@angular/core';
+import { Component, inject, signal, computed, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { UploadModalComponent } from '../upload-modal/upload-modal.component';
@@ -6,6 +6,7 @@ import { DocumentService } from '../../services/document.service';
 import { AuthService } from '../../services/auth.service';
 import { NotificationService } from '../../services/notification.service';
 import { DocumentItem, ChecklistResponse } from '../../models/document.model';
+import { StudentUser } from '../../models/user.model';
 import { environment } from '../../../environments/environment';
 
 function getBackendUrl(path: string): string {
@@ -48,7 +49,40 @@ function getBackendUrl(path: string): string {
       <!-- Main Document Checklist Card -->
       <section class="checklist-section glass-panel">
         <div class="checklist-header">
-          <h2 class="checklist-title">Document Checklist</h2>
+          <div>
+            <h2 class="checklist-title">Document Checklist</h2>
+            @if (selectedStudent()) {
+              <p class="checklist-subtitle">
+                Student: <strong>{{ selectedStudent()?.name }}</strong>
+                @if (selectedStudent()?.studentCode) {
+                  <span class="student-code-badge">({{ selectedStudent()?.studentCode }})</span>
+                }
+              </p>
+            }
+          </div>
+
+          @if (isAdmin() && students().length > 0) {
+            <div class="student-selector-wrapper">
+              <label for="studentSelect" class="selector-label">Select Student:</label>
+              <div class="select-dropdown-container">
+                <select 
+                  id="studentSelect" 
+                  class="student-dropdown-select" 
+                  [ngModel]="selectedStudent()?.id" 
+                  (ngModelChange)="onStudentChange($event)"
+                >
+                  @for (s of students(); track s.id) {
+                    <option [value]="s.id">
+                      {{ s.name }} ({{ s.studentCode || s.id }})
+                    </option>
+                  }
+                </select>
+                <div class="select-chevron">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                </div>
+              </div>
+            </div>
+          }
         </div>
 
         <!-- Documents Table -->
@@ -235,6 +269,8 @@ function getBackendUrl(path: string): string {
     @if (activeModal() === 'upload' && selectedDoc()) {
       <app-upload-modal 
         [document]="selectedDoc()!"
+        [studentName]="selectedStudent()?.name || ''"
+        [studentCode]="selectedStudent()?.studentCode || ''"
         [uploading]="uploadingInProgress"
         (onUpload)="handleUpload($event)"
         (onCancel)="closeModals()"
@@ -587,9 +623,77 @@ function getBackendUrl(path: string): string {
     }
 
     .checklist-subtitle {
-      font-size: 0.84rem;
+      font-size: 0.88rem;
       color: #78716C;
       margin: 4px 0 0 0;
+      strong {
+        color: #1C1917;
+      }
+    }
+
+    .student-code-badge {
+      font-size: 0.8rem;
+      color: #EA580C;
+      font-weight: 600;
+      margin-left: 4px;
+    }
+
+    .student-selector-wrapper {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: #FAF7F2;
+      padding: 6px 14px;
+      border: 1px solid #EAE3D8;
+      border-radius: var(--radius-md);
+    }
+
+    .selector-label {
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: #78716C;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      white-space: nowrap;
+    }
+
+    .select-dropdown-container {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .student-dropdown-select {
+      appearance: none;
+      -webkit-appearance: none;
+      background: #FFFFFF;
+      border: 1.5px solid #E5DED3;
+      border-radius: 6px;
+      padding: 6px 32px 6px 12px;
+      font-size: 0.88rem;
+      font-weight: 600;
+      color: #1C1917;
+      cursor: pointer;
+      outline: none;
+      transition: all 0.2s;
+    }
+
+    .student-dropdown-select:hover {
+      border-color: #F15A24;
+    }
+
+    .student-dropdown-select:focus {
+      border-color: #F15A24;
+      box-shadow: 0 0 0 3px rgba(241, 90, 36, 0.15);
+    }
+
+    .select-chevron {
+      position: absolute;
+      right: 10px;
+      pointer-events: none;
+      color: #78716C;
+      display: flex;
+      align-items: center;
     }
 
 
@@ -741,6 +845,10 @@ export class DashboardComponent implements OnInit {
   notificationService = inject(NotificationService);
 
   documents = signal<DocumentItem[]>([]);
+  students = signal<StudentUser[]>([]);
+  selectedStudent = signal<StudentUser | null>(null);
+  isAdmin = computed(() => this.authService.isAdmin());
+  loadingStudents = signal<boolean>(false);
 
   // Modal controls
   activeModal = signal<'upload' | 'delete' | 'reset-password' | null>(null);
@@ -758,11 +866,57 @@ export class DashboardComponent implements OnInit {
   uploadingInProgress = signal<boolean>(false);
 
   ngOnInit() {
-    this.loadDocuments();
+    if (this.isAdmin()) {
+      this.loadStudentsAndChecklist();
+    } else {
+      const cur = this.authService.currentUser();
+      if (cur) {
+        this.selectedStudent.set({
+          id: cur.id,
+          name: cur.name,
+          email: cur.email,
+          role: cur.role,
+          studentCode: cur.studentCode
+        });
+      }
+      this.loadDocuments();
+    }
   }
 
-  loadDocuments() {
-    this.docService.getDocuments().subscribe({
+  loadStudentsAndChecklist(preferredStudentId?: string) {
+    this.loadingStudents.set(true);
+    this.docService.getStudents().subscribe({
+      next: (list) => {
+        this.loadingStudents.set(false);
+        this.students.set(list);
+        if (list.length > 0) {
+          const match = preferredStudentId ? list.find(s => s.id === preferredStudentId) : null;
+          const target = match || list[0];
+          this.selectedStudent.set(target);
+          this.loadDocuments(target.id);
+        } else {
+          this.selectedStudent.set(null);
+          this.loadDocuments();
+        }
+      },
+      error: () => {
+        this.loadingStudents.set(false);
+        this.loadDocuments();
+      }
+    });
+  }
+
+  onStudentChange(studentId: string) {
+    const student = this.students().find(s => s.id === studentId);
+    if (student) {
+      this.selectedStudent.set(student);
+      this.loadDocuments(student.id);
+    }
+  }
+
+  loadDocuments(userId?: string) {
+    const targetId = userId || this.selectedStudent()?.id;
+    this.docService.getDocuments(targetId).subscribe({
       next: (res: ChecklistResponse) => {
         this.documents.set(res.documents);
 
@@ -908,7 +1062,8 @@ export class DashboardComponent implements OnInit {
 
     this.uploadingInProgress.set(true);
     const docId = (doc.id && doc.id > 0) ? doc.id : null;
-    this.docService.uploadDocument(docId, event.file, event.notes, event.documentType).subscribe({
+    const targetUserId = this.selectedStudent()?.id;
+    this.docService.uploadDocument(docId, event.file, event.notes, event.documentType, targetUserId).subscribe({
       next: (res: any) => {
         this.uploadingInProgress.set(false);
         const renamedName = res?.generatedFileName || (event.documentType ? `${event.documentType}.${event.file.name.split('.').pop()}` : event.file.name);
@@ -917,7 +1072,7 @@ export class DashboardComponent implements OnInit {
           `Document saved as "${renamedName}" to checklist and Drive.`
         );
         this.closeModals();
-        this.loadDocuments();
+        this.loadDocuments(targetUserId);
       },
       error: (err) => {
         this.uploadingInProgress.set(false);
@@ -934,11 +1089,12 @@ export class DashboardComponent implements OnInit {
     if (!doc) return;
 
     const verNum = this.selectedVersion();
-    this.docService.deleteDocument(doc.id, verNum).subscribe({
+    const targetUserId = this.selectedStudent()?.id;
+    this.docService.deleteDocument(doc.id, verNum, targetUserId).subscribe({
       next: (res) => {
         this.notificationService.info('Deleted', res.message);
         this.closeModals();
-        this.loadDocuments();
+        this.loadDocuments(targetUserId);
       },
       error: (err) => {
         this.notificationService.error('Delete Failed', err.error?.error || 'Failed to delete document.');

@@ -1,8 +1,8 @@
-require('dotenv').config({ override: true });
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env'), override: true });
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
-const path = require('path');
 const fs = require('fs');
 const jwt = require('jsonwebtoken');
 
@@ -14,6 +14,13 @@ const mailService = require('./mailService');
 const app = express();
 const PORT = process.env.PORT || 5000;
 const JWT_SECRET = process.env.JWT_SECRET || 'doc-checklist-super-secret-key-2026';
+
+process.on('uncaughtException', (err) => {
+  console.error('[Process Error] Uncaught Exception:', err);
+});
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[Process Error] Unhandled Rejection at:', promise, 'reason:', reason);
+});
 
 // Middleware
 app.use(cors());
@@ -353,6 +360,31 @@ app.get('/api/documents/all', authenticateToken, (req, res) => {
   });
 });
 
+// 2b. Get All Students dynamically from MySQL database
+app.get('/api/students', authenticateToken, async (req, res) => {
+  try {
+    await dataStore.loadFromMysql();
+  } catch (_) {}
+
+  const students = (dataStore.data.users || [])
+    .filter(u => u.role !== 'admin')
+    .map(u => ({
+      id: u.id,
+      studentCode: u.studentCode || (u.id ? String(u.id).replace(/^u-/, '') : null),
+      name: u.name,
+      email: u.email,
+      username: u.username,
+      department: u.department,
+      documentsCount: (u.documents || []).length,
+      uploadedCount: (u.documents || []).filter(d => d.uploadStatus === 'Uploaded').length
+    }));
+
+  return res.json({
+    totalStudents: students.length,
+    students
+  });
+});
+
 // 3. Get Single Document with full version history
 app.get('/api/documents/:id', authenticateToken, (req, res) => {
   const docId = parseInt(req.params.id, 10);
@@ -482,7 +514,10 @@ function generateFilenameFromDocType(documentType, originalname) {
 // 4. Upload or Re-upload Document with Dynamic Renaming based on Document Type
 const handleDocumentUpload = async (req, res) => {
   const rawDocId = req.params.id ? parseInt(req.params.id, 10) : null;
-  const targetUserId = req.user.id;
+  const requestedUserId = req.body?.userId || req.query.userId || req.body?.studentId || req.query.studentId;
+  const targetUserId = (req.user.role === 'admin' && requestedUserId)
+    ? requestedUserId
+    : req.user.id;
   const userNotes = req.body.notes || '';
   const requestedDocType = (req.body.documentType || req.body.docType || '').trim();
 
@@ -620,13 +655,11 @@ app.patch('/api/documents/:id/review', authenticateToken, (req, res) => {
 // 7. Delete Document or Version
 app.delete('/api/documents/:id', authenticateToken, async (req, res) => {
   const docId = parseInt(req.params.id, 10);
-  const targetUserId = req.user.id;
+  const requestedUserId = req.body?.userId || req.query.userId || req.body?.studentId || req.query.studentId;
+  const targetUserId = (req.user.role === 'admin' && requestedUserId)
+    ? requestedUserId
+    : req.user.id;
   const versionNumber = req.query.version ? parseInt(req.query.version, 10) : undefined;
-
-  // Refresh latest state from MySQL first
-  try {
-    await dataStore.loadFromMysql();
-  } catch (_) {}
 
   const existingDoc = dataStore.getDocumentById(targetUserId, docId);
   if (!existingDoc) {
@@ -1102,8 +1135,8 @@ app.get('/api', (req, res) => {
     driveStatus: driveService.getDriveStatus(),
     mysqlStatus: {
       connected: db.isDbConnected(),
-      database: process.env.DB_NAME || 'doc_checklist',
-      host: process.env.DB_HOST || 'localhost'
+      database: process.env.DB_NAME || 'trackbox_ysquare_db',
+      host: process.env.DB_HOST || '49.13.118.79'
     }
   });
 });
@@ -1113,9 +1146,7 @@ function listenOnPort(port, retries = 3) {
     console.log(`=======================================================`);
     console.log(`Document Checklist API running on http://localhost:${port}`);
     console.log(`Mode: Google Drive Integration Enabled`);
-    console.log(`Database: MySQL (doc_checklist) Connected`);
-    console.log(`Default User Account:  john.doe@example.com / password123`);
-    console.log(`Default Admin Account: admin@example.com / adminpassword`);
+    console.log(`Database: MySQL (${process.env.DB_NAME || 'trackbox_ysquare_db'}) Connected - Dynamic Users Enabled`);
     console.log(`=======================================================`);
   });
 
@@ -1148,8 +1179,7 @@ function listenOnPort(port, retries = 3) {
           listenOnPort(port, retries - 1);
         }, 1200);
       } else {
-        console.error(`[Error] Port ${port} could not be freed.`);
-        process.exit(1);
+        console.error(`[Error] Port ${port} is already in use by another instance.`);
       }
     } else {
       console.error('[Server Error]:', err);
@@ -1166,12 +1196,6 @@ async function startServer() {
   }
 
   listenOnPort(PORT);
-
-  // Auto-create/verify Google Drive folders for all users asynchronously
-  console.log('[Google Drive] Verifying student folders on startup...');
-  ensureAllUserFolders().catch(err => {
-    console.warn('[Google Drive Folder Sync Notice]:', err.message);
-  });
 }
 
 startServer();
