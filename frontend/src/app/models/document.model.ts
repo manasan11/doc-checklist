@@ -20,6 +20,7 @@ export interface DocumentVersion {
   storageType: string;
   notes?: string;
   approvalStatusAtUpload: string;
+  studentDocumentId?: number;
   verificationStatus?: number;
   rejectionReason?: string;
 }

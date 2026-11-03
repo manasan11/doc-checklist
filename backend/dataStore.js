@@ -245,38 +245,11 @@ class DataStore {
 
   populateDocWithRecords(docItem, activeRecords) {
     if (!docItem || !activeRecords || activeRecords.length === 0) return;
-    const latestActive = activeRecords[activeRecords.length - 1];
-    const latestDriveUrl = toGoogleDriveViewUrl(latestActive.Image);
-    const driveFileIdMatch = (latestDriveUrl || '').match(/\/file\/d\/([^\/]+)/);
-    const latestDriveId = driveFileIdMatch ? driveFileIdMatch[1] : null;
 
-    let vStatus = 0;
-    let aStatus = 'Pending';
-    if (latestActive.Verification_Status !== undefined && latestActive.Verification_Status !== null) {
-      vStatus = Number(latestActive.Verification_Status);
-      if (vStatus === 1) aStatus = 'Approved';
-      else if (vStatus === 2) aStatus = 'Rejected';
-      else aStatus = 'Pending';
-    }
+    // Sort activeRecords ASC by primary key to preserve version sequence 1, 2, 3...
+    const sortedAsc = [...activeRecords].sort((a, b) => (a.Student_Document_Id || 0) - (b.Student_Document_Id || 0));
 
-    const effectiveFileName = latestActive.File_Name || (latestActive.Image ? path.basename(latestActive.Image) : docItem.name);
-
-    docItem.uploadStatus = 'Uploaded';
-    docItem.verificationStatus = vStatus;
-    docItem.approvalStatus = aStatus;
-    docItem.rejectionReason = (vStatus === 2 && (latestActive.rejection_reason || latestActive.rejectionReason))
-      ? String(latestActive.rejection_reason || latestActive.rejectionReason)
-      : (docItem.adminFeedback || '');
-    docItem.isLocked = (vStatus === 1 || aStatus === 'Approved');
-    docItem.fileName = effectiveFileName;
-    docItem.webViewLink = latestDriveUrl;
-    docItem.downloadUrl = latestDriveUrl;
-    docItem.driveFileId = latestDriveId || docItem.driveFileId;
-    docItem.notes = latestActive.Description || docItem.notes || '';
-    docItem.currentVersion = activeRecords.length;
-    docItem.uploadDateTime = latestActive.Entry_date ? new Date(latestActive.Entry_date).toLocaleDateString() : (docItem.uploadDateTime || null);
-
-    docItem.versions = activeRecords.map((r, idx) => {
+    const versions = sortedAsc.map((r, idx) => {
       const verDriveUrl = toGoogleDriveViewUrl(r.Image);
       const verIdMatch = (verDriveUrl || '').match(/\/file\/d\/([^\/]+)/);
       let verVStatus = 0;
@@ -289,18 +262,38 @@ class DataStore {
       }
       return {
         versionNumber: idx + 1,
+        studentDocumentId: r.Student_Document_Id,
         fileName: r.File_Name || (r.Image ? path.basename(r.Image) : docItem.name),
         webViewLink: verDriveUrl,
         downloadUrl: verDriveUrl,
         driveFileId: verIdMatch ? verIdMatch[1] : null,
         notes: r.Description || '',
         uploadDateTime: r.Entry_date ? new Date(r.Entry_date).toLocaleDateString() : null,
-        studentDocumentId: r.Student_Document_Id,
         verificationStatus: verVStatus,
         approvalStatus: verAStatus,
         rejectionReason: r.rejection_reason || ''
       };
     });
+
+    // Requirement 8: Sort documents by upload date, with latest upload appearing first
+    const versionsDesc = [...versions].reverse();
+    const latestActive = versionsDesc[0];
+
+    docItem.uploadStatus = 'Uploaded';
+    docItem.verificationStatus = latestActive.verificationStatus;
+    docItem.approvalStatus = latestActive.approvalStatus;
+    docItem.rejectionReason = (latestActive.verificationStatus === 2 && latestActive.rejectionReason)
+      ? String(latestActive.rejectionReason)
+      : (docItem.adminFeedback || '');
+    docItem.isLocked = (latestActive.verificationStatus === 1 || latestActive.approvalStatus === 'Approved');
+    docItem.fileName = latestActive.fileName;
+    docItem.webViewLink = latestActive.webViewLink;
+    docItem.downloadUrl = latestActive.downloadUrl;
+    docItem.driveFileId = latestActive.driveFileId || docItem.driveFileId;
+    docItem.notes = latestActive.notes || docItem.notes || '';
+    docItem.currentVersion = activeRecords.length;
+    docItem.uploadDateTime = latestActive.uploadDateTime || null;
+    docItem.versions = versionsDesc;
   }
 
   async getOrLoadUserDocuments(userId) {
@@ -956,7 +949,7 @@ class DataStore {
   }
 
   // Admin Review and Lock Methods
-  adminReviewDocument(userId, docId, { approvalStatus, verificationStatus, rejectionReason, isLocked, adminFeedback }) {
+  adminReviewDocument(userId, docId, { approvalStatus, verificationStatus, rejectionReason, isLocked, adminFeedback, versionNumber, studentDocumentId } = {}) {
     const user = this.findUserById(userId);
     if (!user) throw new Error("User not found");
 
@@ -978,18 +971,37 @@ class DataStore {
       vStatus = doc.verificationStatus;
     }
 
+    const finalReason = rejectionReason !== undefined ? rejectionReason : (adminFeedback !== undefined ? adminFeedback : (vStatus === 2 ? doc.rejectionReason : ''));
+
+    // Update specific version in versions array if targeted
+    if (doc.versions && doc.versions.length > 0) {
+      let targetVer = null;
+      if (studentDocumentId) {
+        targetVer = doc.versions.find(v => v.studentDocumentId === Number(studentDocumentId));
+      } else if (versionNumber) {
+        targetVer = doc.versions.find(v => v.versionNumber === Number(versionNumber));
+      } else {
+        targetVer = doc.versions[0]; // latest version
+      }
+
+      if (targetVer) {
+        targetVer.verificationStatus = vStatus;
+        targetVer.approvalStatus = (vStatus === 1 ? 'Approved' : (vStatus === 2 ? 'Rejected' : 'Pending'));
+        targetVer.rejectionReason = vStatus === 2 ? (finalReason || '') : '';
+      }
+    }
+
     if (vStatus !== null) {
       try {
         const db = require('./db');
         const cleanCode = user.studentCode || String(userId).replace(/^u-/, '');
-        const finalReason = rejectionReason !== undefined ? rejectionReason : (adminFeedback !== undefined ? adminFeedback : (vStatus === 2 ? doc.rejectionReason : ''));
         if (vStatus === 2) {
           doc.rejectionReason = finalReason || '';
           doc.adminFeedback = doc.rejectionReason;
         } else if (vStatus === 1 || vStatus === 0) {
           doc.rejectionReason = '';
         }
-        db.updateStudentDocumentVerificationStatus(cleanCode, doc.id, vStatus, doc.rejectionReason);
+        db.updateStudentDocumentVerificationStatus(cleanCode, doc.id, vStatus, doc.rejectionReason, studentDocumentId);
       } catch (dbErr) {
         console.warn('[DataStore] Error updating Verification_Status in MySQL:', dbErr.message);
       }

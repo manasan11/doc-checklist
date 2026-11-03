@@ -777,7 +777,7 @@ app.patch(['/api/documents/:id/review', '/api/documents/:id/verification-status'
     ? requestedUserId
     : (requestedUserId || req.user.id);
 
-  let { approvalStatus, verificationStatus, status, rejectionReason, rejection_reason, reason, isLocked, adminFeedback } = req.body || {};
+  let { approvalStatus, verificationStatus, status, rejectionReason, rejection_reason, reason, isLocked, adminFeedback, versionNumber, studentDocumentId } = req.body || {};
   if (status !== undefined && verificationStatus === undefined) {
     verificationStatus = status;
   }
@@ -789,7 +789,9 @@ app.patch(['/api/documents/:id/review', '/api/documents/:id/verification-status'
       verificationStatus,
       rejectionReason: effectiveReason,
       isLocked,
-      adminFeedback: effectiveReason
+      adminFeedback: effectiveReason,
+      versionNumber,
+      studentDocumentId
     });
 
     const statusLabel = updatedDoc.verificationStatus === 1 ? 'Approved' : (updatedDoc.verificationStatus === 2 ? 'Rejected' : 'Pending');

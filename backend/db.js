@@ -447,21 +447,30 @@ async function updateStudentDocumentStaff(studentId, staffId) {
 
 /**
  * Update Verification_Status in student_document table.
+ * Supports updating a specific version by Student_Document_Id or the latest version by Document_Id.
  * 0: Pending, 1: Approved, 2: Rejected
  */
-async function updateStudentDocumentVerificationStatus(studentId, docId, status, rejectionReason = null) {
+async function updateStudentDocumentVerificationStatus(studentId, docId, status, rejectionReason = null, studentDocumentId = null) {
   const pool = getPool();
-  if (!pool || !studentId || docId === undefined) return false;
+  if (!pool || !studentId) return false;
   const cleanStudentNum = String(studentId).replace(/\D/g, '');
   const cleanId = cleanStudentNum ? Number(cleanStudentNum) : String(studentId).replace(/^u-/, '').trim();
   const vStatus = Number(status) || 0;
   const reasonVal = vStatus === 2 ? (rejectionReason ? String(rejectionReason).trim() : null) : null;
   try {
-    const [res] = await pool.query(
-      'UPDATE student_document SET Verification_Status = ?, rejection_reason = ? WHERE Student_Id = ? AND Document_Id = ? AND (DeleteStatus = 0 OR DeleteStatus IS NULL)',
-      [vStatus, reasonVal, cleanId, Number(docId)]
-    );
-    return Boolean(res && res.affectedRows > 0);
+    if (studentDocumentId) {
+      const [res] = await pool.query(
+        'UPDATE student_document SET Verification_Status = ?, rejection_reason = ? WHERE Student_Document_Id = ? AND Student_Id = ? AND (DeleteStatus = 0 OR DeleteStatus IS NULL)',
+        [vStatus, reasonVal, Number(studentDocumentId), cleanId]
+      );
+      return Boolean(res && res.affectedRows > 0);
+    } else {
+      const [res] = await pool.query(
+        'UPDATE student_document SET Verification_Status = ?, rejection_reason = ? WHERE Student_Id = ? AND Document_Id = ? AND (DeleteStatus = 0 OR DeleteStatus IS NULL) ORDER BY Student_Document_Id DESC LIMIT 1',
+        [vStatus, reasonVal, cleanId, Number(docId)]
+      );
+      return Boolean(res && res.affectedRows > 0);
+    }
   } catch (err) {
     console.warn('[DB Query] updateStudentDocumentVerificationStatus error:', err.message);
     return false;

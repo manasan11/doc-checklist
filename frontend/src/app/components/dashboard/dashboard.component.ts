@@ -5,7 +5,7 @@ import { UploadModalComponent } from '../upload-modal/upload-modal.component';
 import { DocumentService } from '../../services/document.service';
 import { AuthService } from '../../services/auth.service';
 import { NotificationService } from '../../services/notification.service';
-import { DocumentItem, ChecklistResponse } from '../../models/document.model';
+import { DocumentItem, DocumentVersion, ChecklistResponse } from '../../models/document.model';
 import { StudentUser } from '../../models/user.model';
 import { environment } from '../../../environments/environment';
 
@@ -101,111 +101,182 @@ function getBackendUrl(path: string): string {
             </thead>
             <tbody>
               @for (doc of documents(); track doc.id; let docIndex = $index) {
-                <tr [class.row-highlight]="selectedDoc()?.id === doc.id">
-                  <!-- 1. No. -->
-                  <td class="col-no font-mono">
-                    <span class="no-badge">#{{ docIndex + 1 }}</span>
-                  </td>
-
-                  <!-- 2. Document Name -->
-                  <td class="col-name">
-                    <div class="doc-info-block">
-                      <div class="doc-primary-line">
-                        <span class="doc-name-text">{{ doc.name }}</span>
-                        @if (doc.isLocked) {
-                          <span class="lock-indicator" title="Document Locked by Admin">
-                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-                          </span>
+                @if (doc.versions && doc.versions.length > 0) {
+                  @for (ver of doc.versions; track ver.versionNumber; let isFirst = $first) {
+                    <tr [class.row-highlight]="selectedDoc()?.id === doc.id" [class.sub-version-row]="!isFirst">
+                      <!-- 1. No. -->
+                      <td class="col-no font-mono">
+                        @if (isFirst) {
+                          <span class="no-badge">#{{ doc.id }}</span>
+                        } @else {
+                          <span class="version-sub-indicator" title="Previous upload">↳</span>
                         }
-                      </div>
-                    </div>
-                  </td>
+                      </td>
 
-                  <!-- 3. Verification Status (0: Pending, 1: Approved, 2: Rejected) -->
-                  <td class="col-upload-status">
-                    @if (doc.fileName && doc.uploadStatus === 'Uploaded') {
-                      <div class="verification-status-cell">
-                        <div class="status-badge-row">
-                          <span 
-                            class="badge" 
-                            [ngClass]="getVerificationBadgeClass(doc)"
-                          >
-                            <span class="dot" [ngClass]="getVerificationDotClass(doc)"></span>
-                            {{ getVerificationStatusLabel(doc) }}
-                          </span>
+                      <!-- 2. Document Name -->
+                      <td class="col-name">
+                        @if (isFirst) {
+                          <div class="doc-info-block">
+                            <div class="doc-primary-line">
+                              <span class="doc-name-text">{{ doc.name }}</span>
+                              @if (doc.versions.length > 1) {
+                                <span class="version-badge-pill latest">v{{ ver.versionNumber }} (Latest)</span>
+                              }
+                              @if (doc.isLocked) {
+                                <span class="lock-indicator" title="Document Locked by Admin">
+                                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                                </span>
+                              }
+                            </div>
+                          </div>
+                        } @else {
+                          <div class="doc-info-block sub-version-block">
+                            <div class="sub-version-line">
+                              <span class="version-badge-pill previous">v{{ ver.versionNumber }}</span>
+                              <span class="sub-version-filename font-mono" [title]="ver.fileName">{{ ver.fileName }}</span>
+                            </div>
+                          </div>
+                        }
+                      </td>
 
-                          @if (isAdmin()) {
-                            <div class="status-action-btns">
-                              @if (doc.verificationStatus !== 1) {
-                                <button 
-                                  class="btn-status-action btn-status-approve" 
-                                  (click)="setVerificationStatus(doc, 1)" 
-                                  title="Approve Document (Status: 1)">
-                                  ✓
-                                </button>
-                              }
-                              @if (doc.verificationStatus !== 2) {
-                                <button 
-                                  class="btn-status-action btn-status-reject" 
-                                  (click)="promptRejectionReason(doc)" 
-                                  title="Reject Document with Reason (Status: 2)">
-                                  ✕
-                                </button>
-                              }
-                              @if (doc.verificationStatus !== 0) {
-                                <button 
-                                  class="btn-status-action btn-status-reset" 
-                                  (click)="setVerificationStatus(doc, 0)" 
-                                  title="Reset to Pending (Status: 0)">
-                                  ↺
-                                </button>
-                              }
+                      <!-- 3. Verification Status (0: Pending, 1: Approved, 2: Rejected) -->
+                      <td class="col-upload-status">
+                        <div class="verification-status-cell">
+                          <div class="status-badge-row">
+                            <span 
+                              class="badge" 
+                              [ngClass]="getVersionBadgeClass(ver)"
+                            >
+                              <span class="dot" [ngClass]="getVersionDotClass(ver)"></span>
+                              {{ getVersionStatusLabel(ver) }}
+                            </span>
+
+                            @if (isAdmin()) {
+                              <div class="status-action-btns">
+                                @if (ver.verificationStatus !== 1) {
+                                  <button 
+                                    class="btn-status-action btn-status-approve" 
+                                    (click)="setVersionVerificationStatus(doc, ver, 1)" 
+                                    title="Approve Version {{ ver.versionNumber }}">
+                                    ✓
+                                  </button>
+                                }
+                                @if (ver.verificationStatus !== 2) {
+                                  <button 
+                                    class="btn-status-action btn-status-reject" 
+                                    (click)="promptVersionRejectionReason(doc, ver)" 
+                                    title="Reject Version {{ ver.versionNumber }} with Reason">
+                                    ✕
+                                  </button>
+                                }
+                                @if (ver.verificationStatus !== 0) {
+                                  <button 
+                                    class="btn-status-action btn-status-reset" 
+                                    (click)="setVersionVerificationStatus(doc, ver, 0)" 
+                                    title="Reset Version {{ ver.versionNumber }} to Pending">
+                                    ↺
+                                  </button>
+                                }
+                              </div>
+                            }
+                          </div>
+
+                          <!-- Rejection Reason for this specific version -->
+                          @if (ver.verificationStatus === 2 && ver.rejectionReason) {
+                            <div class="rejection-reason-box" [title]="ver.rejectionReason">
+                              <span class="rejection-reason-icon">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                              </span>
+                              <span class="rejection-reason-text">
+                                <strong class="rejection-reason-label">Reason:</strong>{{ ver.rejectionReason }}
+                              </span>
                             </div>
                           }
                         </div>
+                      </td>
 
-                        <!-- Rejection Reason displayed only when status is 2 (Rejected) and rejectionReason exists -->
-                        @if (doc.verificationStatus === 2 && doc.rejectionReason) {
-                          <div class="rejection-reason-box" [title]="doc.rejectionReason">
-                            <span class="rejection-reason-icon">
-                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
-                            </span>
-                            <span class="rejection-reason-text">
-                              <strong class="rejection-reason-label">Reason:</strong>{{ doc.rejectionReason }}
-                            </span>
-                          </div>
+                      <!-- 4. Upload / Re-upload Option -->
+                      <td class="col-upload-action">
+                        @if (isFirst) {
+                          @if (doc.permissions.canUpload) {
+                            <button 
+                              class="btn btn-sm btn-secondary"
+                              (click)="openUploadModal(doc)"
+                            >
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                              Re-upload
+                            </button>
+                          } @else {
+                            <button 
+                              class="btn btn-secondary btn-sm" 
+                              disabled 
+                              [title]="getUploadDisabledReason(doc)"
+                            >
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                              {{ doc.permissions.uploadLabel }}
+                            </button>
+                          }
+                        } @else {
+                          <span class="datetime-empty">&mdash;</span>
                         }
+                      </td>
+
+                      <!-- 5. View Document -->
+                      <td class="col-view">
+                        <button class="btn btn-secondary btn-sm" (click)="openViewerVersion(doc, ver.versionNumber)" [title]="'View Version ' + ver.versionNumber + ' (' + (ver.fileName || doc.name) + ')'">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                          View
+                        </button>
+                      </td>
+
+                      <!-- 6. Upload Date & Time -->
+                      <td class="col-datetime">
+                        @if (ver.uploadDateTime) {
+                          <span class="datetime-text font-medium">{{ ver.uploadDateTime }}</span>
+                        } @else {
+                          <span class="datetime-empty">&mdash;</span>
+                        }
+                      </td>
+
+                      <!-- 7. Delete -->
+                      <td class="col-delete">
+                        @if (doc.permissions.canDelete) {
+                          <button class="btn btn-danger btn-sm" (click)="confirmDeleteVersion(doc, ver.versionNumber)" title="Delete Version {{ ver.versionNumber }}">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                            Delete
+                          </button>
+                        } @else {
+                          <span class="datetime-empty">&mdash;</span>
+                        }
+                      </td>
+                    </tr>
+                  }
+                } @else {
+                  <tr [class.row-highlight]="selectedDoc()?.id === doc.id">
+                    <!-- 1. No. -->
+                    <td class="col-no font-mono">
+                      <span class="no-badge">#{{ doc.id }}</span>
+                    </td>
+
+                    <!-- 2. Document Name -->
+                    <td class="col-name">
+                      <div class="doc-info-block">
+                        <div class="doc-primary-line">
+                          <span class="doc-name-text">{{ doc.name }}</span>
+                        </div>
                       </div>
-                    } @else {
+                    </td>
+
+                    <!-- 3. Verification Status -->
+                    <td class="col-upload-status">
                       <span class="badge badge-pending-upload">
                         <span class="dot dot-muted"></span>
                         Upload Pending
                       </span>
-                    }
-                  </td>
+                    </td>
 
-                  <!-- 4. Upload / Re-upload Option -->
-                  <td class="col-upload-action">
-                    @if (doc.fileName && doc.uploadStatus === 'Uploaded') {
-                      @if (doc.permissions.canUpload) {
-                        <button 
-                          class="btn btn-sm btn-secondary"
-                          (click)="openUploadModal(doc)"
-                        >
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
-                          Re-upload
-                        </button>
-                      } @else {
-                        <button 
-                          class="btn btn-secondary btn-sm" 
-                          disabled 
-                          [title]="getUploadDisabledReason(doc)"
-                        >
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-                          {{ doc.permissions.uploadLabel }}
-                        </button>
-                      }
-                    } @else {
+                    <!-- 4. Upload / Re-upload Option -->
+                    <td class="col-upload-action">
                       @if (doc.permissions.canUpload) {
                         <button 
                           class="btn btn-primary btn-sm"
@@ -217,45 +288,27 @@ function getBackendUrl(path: string): string {
                       } @else {
                         <button class="btn btn-secondary btn-sm" disabled>Upload</button>
                       }
-                    }
-                  </td>
+                    </td>
 
-                  <!-- 5. View Document -->
-                  <td class="col-view">
-                    @if (doc.fileName && doc.uploadStatus === 'Uploaded') {
-                      <button class="btn btn-secondary btn-sm" (click)="openViewerVersion(doc)" [title]="'View ' + (doc.fileName || doc.name)">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                        View
-                      </button>
-                    } @else {
+                    <!-- 5. View Document -->
+                    <td class="col-view">
                       <button class="btn btn-ghost btn-sm" disabled title="Document has not been uploaded yet">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
                         View
                       </button>
-                    }
-                  </td>
+                    </td>
 
-                  <!-- 6. Upload Date & Time -->
-                  <td class="col-datetime">
-                    @if (doc.uploadDateTime) {
-                      <span class="datetime-text font-medium">{{ doc.uploadDateTime }}</span>
-                    } @else {
+                    <!-- 6. Upload Date & Time -->
+                    <td class="col-datetime">
                       <span class="datetime-empty">&mdash;</span>
-                    }
-                  </td>
+                    </td>
 
-                  <!-- 7. Delete -->
-                  <td class="col-delete">
-                    @if (doc.fileName && doc.uploadStatus === 'Uploaded' && doc.permissions.canDelete) {
-                      <button class="btn btn-danger btn-sm" (click)="confirmDelete(doc)" title="Delete document">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-                        Delete
-                      </button>
-                    } @else {
+                    <!-- 7. Delete -->
+                    <td class="col-delete">
                       <span class="datetime-empty">&mdash;</span>
-                    }
-                  </td>
-                </tr>
+                    </td>
+                  </tr>
+                }
               }
             </tbody>
           </table>
@@ -752,6 +805,47 @@ function getBackendUrl(path: string): string {
       background: #FFF7ED;
     }
 
+    .version-badge-pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 7px;
+      border-radius: 9999px;
+      font-size: 0.68rem;
+      font-weight: 700;
+      font-family: ui-monospace, monospace;
+      letter-spacing: 0.02em;
+    }
+    .version-badge-pill.latest {
+      background: #EFF6FF;
+      color: #2563EB;
+      border: 1px solid #BFDBFE;
+    }
+    .version-badge-pill.previous {
+      background: #F3F4F6;
+      color: #6B7280;
+      border: 1px solid #E5E7EB;
+    }
+    .version-sub-indicator {
+      font-size: 1.1rem;
+      color: #D1D5DB;
+      font-weight: bold;
+      display: inline-block;
+      margin-left: 6px;
+    }
+    .sub-version-line {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .sub-version-filename {
+      font-size: 0.78rem;
+      color: #4B5563;
+      max-width: 220px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
     .no-badge {
       font-weight: 700;
       color: #A8A29E;
@@ -1037,6 +1131,102 @@ export class DashboardComponent implements OnInit {
         this.notificationService.error('Fetch Error', 'Failed to load document checklist.');
       }
     });
+  }
+
+  getVersionStatusLabel(ver: { verificationStatus?: number; approvalStatus?: string; approvalStatusAtUpload?: string }): string {
+    const vStatus = ver.verificationStatus !== undefined && ver.verificationStatus !== null
+      ? Number(ver.verificationStatus)
+      : ((ver.approvalStatus === 'Approved' || ver.approvalStatusAtUpload === 'Approved') ? 1 : ((ver.approvalStatus === 'Rejected' || ver.approvalStatusAtUpload === 'Rejected') ? 2 : 0));
+
+    switch (vStatus) {
+      case 1:
+        return 'Approved';
+      case 2:
+        return 'Rejected';
+      case 0:
+      default:
+        return 'Pending';
+    }
+  }
+
+  getVersionBadgeClass(ver: { verificationStatus?: number; approvalStatus?: string; approvalStatusAtUpload?: string }): string {
+    const vStatus = ver.verificationStatus !== undefined && ver.verificationStatus !== null
+      ? Number(ver.verificationStatus)
+      : ((ver.approvalStatus === 'Approved' || ver.approvalStatusAtUpload === 'Approved') ? 1 : ((ver.approvalStatus === 'Rejected' || ver.approvalStatusAtUpload === 'Rejected') ? 2 : 0));
+
+    switch (vStatus) {
+      case 1:
+        return 'badge-accepted';
+      case 2:
+        return 'badge-rejected';
+      case 0:
+      default:
+        return 'badge-verifying';
+    }
+  }
+
+  getVersionDotClass(ver: { verificationStatus?: number; approvalStatus?: string; approvalStatusAtUpload?: string }): string {
+    const vStatus = ver.verificationStatus !== undefined && ver.verificationStatus !== null
+      ? Number(ver.verificationStatus)
+      : ((ver.approvalStatus === 'Approved' || ver.approvalStatusAtUpload === 'Approved') ? 1 : ((ver.approvalStatus === 'Rejected' || ver.approvalStatusAtUpload === 'Rejected') ? 2 : 0));
+
+    switch (vStatus) {
+      case 1:
+        return 'dot-success';
+      case 2:
+        return 'dot-danger';
+      case 0:
+      default:
+        return 'dot-verifying';
+    }
+  }
+
+  promptVersionRejectionReason(doc: DocumentItem, ver: DocumentVersion) {
+    const defaultReason = ver.rejectionReason || doc.rejectionReason || 'Document is unclear, invalid, or does not meet required specifications.';
+    const reason = window.prompt(`Please enter rejection reason for "${doc.name}" (Version ${ver.versionNumber}):`, defaultReason);
+    if (reason !== null) {
+      this.setVersionVerificationStatus(doc, ver, 2, reason.trim());
+    }
+  }
+
+  setVersionVerificationStatus(doc: DocumentItem, ver: DocumentVersion, newStatus: number, rejectionReason?: string) {
+    const student = this.selectedStudent();
+    const userId = student ? (student.id || `u-${student.studentCode}`) : undefined;
+    const label = newStatus === 1 ? 'Approved' : (newStatus === 2 ? 'Rejected' : 'Pending');
+    const effectiveReason = newStatus === 2 ? (rejectionReason !== undefined ? rejectionReason : (ver.rejectionReason || '')) : '';
+
+    this.docService.updateVerificationStatus(
+      doc.id, 
+      newStatus, 
+      userId, 
+      effectiveReason, 
+      ver.studentDocumentId, 
+      ver.versionNumber
+    ).subscribe({
+      next: () => {
+        ver.verificationStatus = newStatus;
+        ver.rejectionReason = effectiveReason;
+        if (doc.versions && doc.versions[0] === ver) {
+          doc.verificationStatus = newStatus;
+          doc.approvalStatus = newStatus === 1 ? 'Approved' : (newStatus === 2 ? 'Rejected' : 'Pending');
+          doc.isLocked = (newStatus === 1);
+          doc.rejectionReason = effectiveReason;
+          if (doc.permissions) {
+            doc.permissions.canUpload = newStatus !== 1;
+          }
+        }
+        this.notificationService.success('Status Updated', `Version ${ver.versionNumber} of "${doc.name}" marked as ${label}`);
+      },
+      error: (err: any) => {
+        this.notificationService.error('Update Failed', err.error?.error || err.message || 'Failed to update verification status');
+      }
+    });
+  }
+
+  confirmDeleteVersion(doc: DocumentItem, versionNum?: number) {
+    this.selectedDoc.set(doc);
+    this.selectedVersion.set(versionNum !== undefined ? versionNum : undefined);
+    this.activeModal.set('delete');
   }
 
   getVerificationStatusLabel(doc: DocumentItem): string {

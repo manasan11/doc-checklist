@@ -231,11 +231,21 @@ export class DocumentService {
 
   /**
    * Update Verification_Status in MySQL (0: Pending, 1: Approved, 2: Rejected)
+   * Supports updating a specific version by studentDocumentId or versionNumber
    */
-  updateVerificationStatus(docId: number, status: number, userId?: string, rejectionReason?: string): Observable<any> {
+  updateVerificationStatus(
+    docId: number, 
+    status: number, 
+    userId?: string, 
+    rejectionReason?: string, 
+    studentDocumentId?: number, 
+    versionNumber?: number
+  ): Observable<any> {
     const payload: any = { verificationStatus: status };
     if (userId) payload.userId = userId;
     if (rejectionReason !== undefined) payload.rejectionReason = rejectionReason;
+    if (studentDocumentId !== undefined) payload.studentDocumentId = studentDocumentId;
+    if (versionNumber !== undefined) payload.versionNumber = versionNumber;
     return this.http.patch<any>(`${API_URL}/documents/${docId}/review`, payload, {
       headers: this.authService.getAuthHeaders()
     });
