@@ -243,6 +243,66 @@ class DataStore {
     return null;
   }
 
+  populateDocWithRecords(docItem, activeRecords) {
+    if (!docItem || !activeRecords || activeRecords.length === 0) return;
+    const latestActive = activeRecords[activeRecords.length - 1];
+    const latestDriveUrl = toGoogleDriveViewUrl(latestActive.Image);
+    const driveFileIdMatch = (latestDriveUrl || '').match(/\/file\/d\/([^\/]+)/);
+    const latestDriveId = driveFileIdMatch ? driveFileIdMatch[1] : null;
+
+    let vStatus = 0;
+    let aStatus = 'Pending';
+    if (latestActive.Verification_Status !== undefined && latestActive.Verification_Status !== null) {
+      vStatus = Number(latestActive.Verification_Status);
+      if (vStatus === 1) aStatus = 'Approved';
+      else if (vStatus === 2) aStatus = 'Rejected';
+      else aStatus = 'Pending';
+    }
+
+    const effectiveFileName = latestActive.File_Name || (latestActive.Image ? path.basename(latestActive.Image) : docItem.name);
+
+    docItem.uploadStatus = 'Uploaded';
+    docItem.verificationStatus = vStatus;
+    docItem.approvalStatus = aStatus;
+    docItem.rejectionReason = (vStatus === 2 && (latestActive.rejection_reason || latestActive.rejectionReason))
+      ? String(latestActive.rejection_reason || latestActive.rejectionReason)
+      : (docItem.adminFeedback || '');
+    docItem.isLocked = (vStatus === 1 || aStatus === 'Approved');
+    docItem.fileName = effectiveFileName;
+    docItem.webViewLink = latestDriveUrl;
+    docItem.downloadUrl = latestDriveUrl;
+    docItem.driveFileId = latestDriveId || docItem.driveFileId;
+    docItem.notes = latestActive.Description || docItem.notes || '';
+    docItem.currentVersion = activeRecords.length;
+    docItem.uploadDateTime = latestActive.Entry_date ? new Date(latestActive.Entry_date).toLocaleDateString() : (docItem.uploadDateTime || null);
+
+    docItem.versions = activeRecords.map((r, idx) => {
+      const verDriveUrl = toGoogleDriveViewUrl(r.Image);
+      const verIdMatch = (verDriveUrl || '').match(/\/file\/d\/([^\/]+)/);
+      let verVStatus = 0;
+      let verAStatus = 'Pending';
+      if (r.Verification_Status !== undefined && r.Verification_Status !== null) {
+        verVStatus = Number(r.Verification_Status);
+        if (verVStatus === 1) verAStatus = 'Approved';
+        else if (verVStatus === 2) verAStatus = 'Rejected';
+        else verAStatus = 'Pending';
+      }
+      return {
+        versionNumber: idx + 1,
+        fileName: r.File_Name || (r.Image ? path.basename(r.Image) : docItem.name),
+        webViewLink: verDriveUrl,
+        downloadUrl: verDriveUrl,
+        driveFileId: verIdMatch ? verIdMatch[1] : null,
+        notes: r.Description || '',
+        uploadDateTime: r.Entry_date ? new Date(r.Entry_date).toLocaleDateString() : null,
+        studentDocumentId: r.Student_Document_Id,
+        verificationStatus: verVStatus,
+        approvalStatus: verAStatus,
+        rejectionReason: r.rejection_reason || ''
+      };
+    });
+  }
+
   async getOrLoadUserDocuments(userId) {
     const user = await this.findOrLoadUser(userId);
     if (!user) return [];
@@ -259,81 +319,98 @@ class DataStore {
 
       const stuDocs = await db.getStudentUploadedDocuments(studentCode, legacyNumId);
 
-      // Match each active record to one of the 11 documents
-      const docsByTargetId = new Map();
+      // Group active records by target document ID or create dynamic entries
+      const matchedMap = new Map();
+      const customDocsMap = new Map();
+
       for (const sd of stuDocs) {
-        if (!sd.File_Name || sd.DeleteStatus === 1) continue;
+        if (sd.DeleteStatus === 1) continue;
+        if (!sd.File_Name && !sd.Image && !sd.Document_Name) continue;
 
         const matched = this.matchDocumentTo11List(userDocs, sd.Document_Id, sd.Document_Name);
         if (matched) {
-          if (!docsByTargetId.has(matched.id)) {
-            docsByTargetId.set(matched.id, []);
+          if (!matchedMap.has(matched.id)) {
+            matchedMap.set(matched.id, []);
           }
-          docsByTargetId.get(matched.id).push(sd);
+          matchedMap.get(matched.id).push(sd);
+        } else {
+          // Document not in standard 11 templates (e.g. Birth Certificate ID: 86, Conditional Offer Letter ID: 94)
+          const customKey = (sd.Document_Id !== undefined && sd.Document_Id !== null)
+            ? Number(sd.Document_Id)
+            : String(sd.Document_Name || `doc_${sd.Student_Document_Id}`).toLowerCase().trim();
+          if (!customDocsMap.has(customKey)) {
+            customDocsMap.set(customKey, []);
+          }
+          customDocsMap.get(customKey).push(sd);
         }
       }
 
-      for (const [targetDocId, activeRecords] of docsByTargetId.entries()) {
+      // Populate matched standard documents
+      for (const [targetDocId, activeRecords] of matchedMap.entries()) {
         const docItem = userDocs.find(d => d.id === targetDocId);
         if (docItem && activeRecords.length > 0) {
-          const latestActive = activeRecords[activeRecords.length - 1];
-          const latestDriveUrl = toGoogleDriveViewUrl(latestActive.Image);
-          const driveFileIdMatch = (latestDriveUrl || '').match(/\/file\/d\/([^\/]+)/);
-          const latestDriveId = driveFileIdMatch ? driveFileIdMatch[1] : null;
-
-          // Dynamic Verification_Status from MySQL (0: Pending, 1: Approved, 2: Rejected)
-          let vStatus = 0;
-          let aStatus = 'Pending';
-          if (latestActive.Verification_Status !== undefined && latestActive.Verification_Status !== null) {
-            vStatus = Number(latestActive.Verification_Status);
-            if (vStatus === 1) aStatus = 'Approved';
-            else if (vStatus === 2) aStatus = 'Rejected';
-            else aStatus = 'Pending';
-          }
-
-          docItem.uploadStatus = 'Uploaded';
-          docItem.verificationStatus = vStatus;
-          docItem.approvalStatus = aStatus;
-          docItem.rejectionReason = latestActive.rejection_reason || latestActive.rejectionReason || docItem.adminFeedback || '';
-          docItem.isLocked = (vStatus === 1 || aStatus === 'Approved');
-          docItem.fileName = latestActive.File_Name;
-          docItem.webViewLink = latestDriveUrl;
-          docItem.downloadUrl = latestDriveUrl;
-          docItem.driveFileId = latestDriveId || docItem.driveFileId;
-          docItem.notes = latestActive.Description || '';
-          docItem.currentVersion = activeRecords.length;
-          docItem.uploadDateTime = latestActive.Entry_date ? new Date(latestActive.Entry_date).toLocaleDateString() : null;
-          docItem.versions = activeRecords.map((r, idx) => {
-            const verDriveUrl = toGoogleDriveViewUrl(r.Image);
-            const verIdMatch = (verDriveUrl || '').match(/\/file\/d\/([^\/]+)/);
-            let verVStatus = 0;
-            let verAStatus = 'Pending';
-            if (r.Verification_Status !== undefined && r.Verification_Status !== null) {
-              verVStatus = Number(r.Verification_Status);
-              if (verVStatus === 1) verAStatus = 'Approved';
-              else if (verVStatus === 2) verAStatus = 'Rejected';
-              else verAStatus = 'Pending';
-            }
-            return {
-              versionNumber: idx + 1,
-              fileName: r.File_Name,
-              webViewLink: verDriveUrl,
-              downloadUrl: verDriveUrl,
-              driveFileId: verIdMatch ? verIdMatch[1] : null,
-              notes: r.Description || '',
-              uploadDateTime: r.Entry_date ? new Date(r.Entry_date).toLocaleDateString() : null,
-              studentDocumentId: r.Student_Document_Id,
-              verificationStatus: verVStatus,
-              approvalStatus: verAStatus
-            };
-          });
+          this.populateDocWithRecords(docItem, activeRecords);
         }
       }
 
-      // Strictly enforce only the 11 documents, in exact order 1..11
-      user.documents = userDocs
-        .filter(d => d.id >= 1 && d.id <= 11)
-        .sort((a, b) => a.id - b.id);
+      // Add custom / direct DB documents that were not part of standard 1..11
+      for (const [customKey, activeRecords] of customDocsMap.entries()) {
+        if (!activeRecords || activeRecords.length === 0) continue;
+        const latest = activeRecords[activeRecords.length - 1];
+        let docId = typeof customKey === 'number' ? customKey : (latest.Document_Id ? Number(latest.Document_Id) : null);
+        if (!docId || userDocs.some(d => d.id === docId)) {
+          docId = userDocs.reduce((max, d) => Math.max(max, d.id || 0), 0) + 1;
+        }
+        const docName = latest.Document_Name || `Document ${docId}`;
+
+        const newDocItem = {
+          id: docId,
+          name: docName,
+          description: latest.Description || `Uploaded ${docName}`,
+          uploadStatus: "Upload Pending",
+          approvalStatus: "Pending",
+          verificationStatus: 0,
+          rejectionReason: "",
+          isLocked: false,
+          currentVersion: 0,
+          uploadDateTime: null,
+          driveFileId: null,
+          fileName: null,
+          savedFileName: null,
+          fileSize: null,
+          mimeType: null,
+          webViewLink: null,
+          downloadUrl: null,
+          storageType: 'google_drive_cloud',
+          notes: "",
+          adminFeedback: "",
+          versions: []
+        };
+        this.populateDocWithRecords(newDocItem, activeRecords);
+        userDocs.push(newDocItem);
+      }
+
+      // Deduplicate userDocs by doc.id
+      const seenIds = new Set();
+      const uniqueDocs = [];
+      for (const d of userDocs) {
+        if (!seenIds.has(d.id)) {
+          seenIds.add(d.id);
+          uniqueDocs.push(d);
+        }
+      }
+
+      // Keep standard checklist 1..11 first, followed by additional custom documents
+      uniqueDocs.sort((a, b) => {
+        const aIsStandard = a.id >= 1 && a.id <= 11;
+        const bIsStandard = b.id >= 1 && b.id <= 11;
+        if (aIsStandard && bIsStandard) return a.id - b.id;
+        if (aIsStandard) return -1;
+        if (bIsStandard) return 1;
+        return a.id - b.id;
+      });
+
+      user.documents = uniqueDocs;
 
       return user.documents.map(doc => ({
         ...doc,
@@ -342,8 +419,6 @@ class DataStore {
     } catch (err) {
       console.warn('[DataStore] getOrLoadUserDocuments error:', err.message);
       return (user.documents || [])
-        .filter(d => d.id >= 1 && d.id <= 11)
-        .sort((a, b) => a.id - b.id)
         .map(doc => ({
           ...doc,
           permissions: this.calculatePermissions(doc)

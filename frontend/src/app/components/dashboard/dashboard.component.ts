@@ -104,7 +104,7 @@ function getBackendUrl(path: string): string {
                 <tr [class.row-highlight]="selectedDoc()?.id === doc.id">
                   <!-- 1. No. -->
                   <td class="col-no font-mono">
-                    <span class="no-badge">#{{ doc.id || (docIndex + 1) }}</span>
+                    <span class="no-badge">#{{ docIndex + 1 }}</span>
                   </td>
 
                   <!-- 2. Document Name -->

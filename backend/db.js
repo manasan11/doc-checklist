@@ -186,9 +186,15 @@ async function getStudentUploadedDocuments(studentCode, legacyNumId = null) {
   const numPart = cleanCode.replace(/\D/g, '');
 
   try {
-    const targets = new Set([cleanCode]);
-    if (legacyNumId) targets.add(String(legacyNumId).trim());
-    if (numPart) targets.add(numPart);
+    const targets = new Set();
+    if (numPart) {
+      targets.add(Number(numPart));
+    } else {
+      targets.add(cleanCode);
+    }
+    if (legacyNumId && !isNaN(Number(legacyNumId))) {
+      targets.add(Number(legacyNumId));
+    }
 
     const targetList = Array.from(targets);
     const placeholders = targetList.map(() => '?').join(' OR Student_Id = ');
@@ -225,19 +231,23 @@ async function loadAllActiveStudentDocuments() {
 async function insertStudentDocument(studentCode, fileName, docId, docName, driveLink, notes = '', assignedStaff = null, verificationStatus = 0) {
   const pool = getPool();
   if (!pool || !studentCode) return null;
+  const cleanStudentNum = String(studentCode).replace(/\D/g, '');
+  const cleanStudent = cleanStudentNum ? Number(cleanStudentNum) : String(studentCode).replace(/^u-/, '').trim();
+  const cleanStaffNum = assignedStaff ? String(assignedStaff).replace(/\D/g, '') : null;
+  const cleanStaff = cleanStaffNum ? Number(cleanStaffNum) : (assignedStaff || null);
   try {
     const [res] = await pool.query(`
       INSERT INTO student_document (
         Student_Id, Entry_date, File_Name, Document_Id, Document_Name, Image, Description, DeleteStatus, Assigned_Staff, Verification_Status
       ) VALUES (?, CURDATE(), ?, ?, ?, ?, ?, 0, ?, ?)
     `, [
-      studentCode,
+      cleanStudent,
       fileName,
       docId,
       docName,
       driveLink,
       notes || '',
-      assignedStaff || null,
+      cleanStaff,
       verificationStatus !== undefined && verificationStatus !== null ? Number(verificationStatus) : 0
     ]);
     return res?.insertId || null;
@@ -253,10 +263,12 @@ async function insertStudentDocument(studentCode, fileName, docId, docName, driv
 async function getActiveStudentDocumentIds(studentCode, legacyNumId, docId) {
   const pool = getPool();
   if (!pool || !studentCode) return [];
+  const cleanStudentNum = String(studentCode).replace(/\D/g, '');
+  const cleanId = cleanStudentNum ? Number(cleanStudentNum) : String(studentCode).replace(/^u-/, '').trim();
   try {
     const [rows] = await pool.query(
-      'SELECT Student_Document_Id FROM student_document WHERE (Student_Id = ? OR Student_Id = ?) AND Document_Id = ? AND (DeleteStatus = 0 OR DeleteStatus IS NULL) ORDER BY Student_Document_Id ASC',
-      [studentCode, legacyNumId ? String(legacyNumId) : studentCode, docId]
+      'SELECT Student_Document_Id FROM student_document WHERE Student_Id = ? AND Document_Id = ? AND (DeleteStatus = 0 OR DeleteStatus IS NULL) ORDER BY Student_Document_Id ASC',
+      [cleanId, Number(docId)]
     );
     return rows || [];
   } catch (err) {
@@ -417,11 +429,14 @@ async function getFollowupUserByStudentAndDept(studentId, deptId = null) {
 async function updateStudentDocumentStaff(studentId, staffId) {
   const pool = getPool();
   if (!pool || !studentId || !staffId) return false;
-  const cleanId = String(studentId).replace(/^u-/, '').trim();
+  const cleanStudentNum = String(studentId).replace(/\D/g, '');
+  const cleanStaffNum = String(staffId).replace(/\D/g, '');
+  const cleanId = cleanStudentNum ? Number(cleanStudentNum) : String(studentId).replace(/^u-/, '').trim();
+  const cleanStaff = cleanStaffNum ? Number(cleanStaffNum) : (staffId || null);
   try {
     const [res] = await pool.query(
       'UPDATE student_document SET Assigned_Staff = ? WHERE Student_Id = ? AND (DeleteStatus = 0 OR DeleteStatus IS NULL)',
-      [staffId, cleanId]
+      [cleanStaff, cleanId]
     );
     return Boolean(res && res.affectedRows > 0);
   } catch (err) {
@@ -437,13 +452,14 @@ async function updateStudentDocumentStaff(studentId, staffId) {
 async function updateStudentDocumentVerificationStatus(studentId, docId, status, rejectionReason = null) {
   const pool = getPool();
   if (!pool || !studentId || docId === undefined) return false;
-  const cleanId = String(studentId).replace(/^u-/, '').trim();
+  const cleanStudentNum = String(studentId).replace(/\D/g, '');
+  const cleanId = cleanStudentNum ? Number(cleanStudentNum) : String(studentId).replace(/^u-/, '').trim();
   const vStatus = Number(status) || 0;
   const reasonVal = vStatus === 2 ? (rejectionReason ? String(rejectionReason).trim() : null) : null;
   try {
     const [res] = await pool.query(
       'UPDATE student_document SET Verification_Status = ?, rejection_reason = ? WHERE Student_Id = ? AND Document_Id = ? AND (DeleteStatus = 0 OR DeleteStatus IS NULL)',
-      [vStatus, reasonVal, cleanId, docId]
+      [vStatus, reasonVal, cleanId, Number(docId)]
     );
     return Boolean(res && res.affectedRows > 0);
   } catch (err) {
