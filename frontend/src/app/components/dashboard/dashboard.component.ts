@@ -102,7 +102,7 @@ function getBackendUrl(path: string): string {
             <tbody>
               @for (doc of documents(); track doc.id; let docIndex = $index) {
                 @if (doc.versions && doc.versions.length > 0) {
-                  @for (ver of doc.versions; track ver.versionNumber; let isFirst = $first) {
+                  @for (ver of doc.versions; track ver.versionNumber; let isFirst = $first; let isLast = $last) {
                     <tr [class.row-highlight]="selectedDoc()?.id === doc.id" [class.sub-version-row]="!isFirst">
                       <!-- 1. No. -->
                       <td class="col-no font-mono">
@@ -185,7 +185,7 @@ function getBackendUrl(path: string): string {
 
                       <!-- 4. Upload / Re-upload Option -->
                       <td class="col-upload-action">
-                        @if (isFirst) {
+                        @if (isLast) {
                           @if (doc.permissions.canUpload) {
                             <button 
                               class="btn btn-sm btn-secondary"
