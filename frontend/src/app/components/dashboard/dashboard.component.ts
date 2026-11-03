@@ -106,11 +106,7 @@ function getBackendUrl(path: string): string {
                     <tr [class.row-highlight]="selectedDoc()?.id === doc.id" [class.sub-version-row]="!isFirst">
                       <!-- 1. No. -->
                       <td class="col-no font-mono">
-                        @if (isFirst) {
-                          <span class="no-badge">#{{ doc.id }}</span>
-                        } @else {
-                          <span class="version-sub-indicator" title="Previous upload">↳</span>
-                        }
+                        <span class="no-badge">#{{ doc.id }}</span>
                       </td>
 
                       <!-- 2. Document Name -->
@@ -119,9 +115,6 @@ function getBackendUrl(path: string): string {
                           <div class="doc-info-block">
                             <div class="doc-primary-line">
                               <span class="doc-name-text">{{ doc.name }}</span>
-                              @if (doc.versions.length > 1) {
-                                <span class="version-badge-pill latest">v{{ ver.versionNumber }} (Latest)</span>
-                              }
                               @if (doc.isLocked) {
                                 <span class="lock-indicator" title="Document Locked by Admin">
                                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
@@ -130,12 +123,7 @@ function getBackendUrl(path: string): string {
                             </div>
                           </div>
                         } @else {
-                          <div class="doc-info-block sub-version-block">
-                            <div class="sub-version-line">
-                              <span class="version-badge-pill previous">v{{ ver.versionNumber }}</span>
-                              <span class="sub-version-filename font-mono" [title]="ver.fileName">{{ ver.fileName }}</span>
-                            </div>
-                          </div>
+                          <span class="datetime-empty">&mdash;</span>
                         }
                       </td>
 
@@ -223,7 +211,7 @@ function getBackendUrl(path: string): string {
 
                       <!-- 5. View Document -->
                       <td class="col-view">
-                        <button class="btn btn-secondary btn-sm" (click)="openViewerVersion(doc, ver.versionNumber)" [title]="'View Version ' + ver.versionNumber + ' (' + (ver.fileName || doc.name) + ')'">
+                        <button class="btn btn-secondary btn-sm" (click)="openViewerVersion(doc, ver.versionNumber)" [title]="'View ' + (ver.fileName || doc.name)">
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
                           View
                         </button>
@@ -241,7 +229,7 @@ function getBackendUrl(path: string): string {
                       <!-- 7. Delete -->
                       <td class="col-delete">
                         @if (doc.permissions.canDelete) {
-                          <button class="btn btn-danger btn-sm" (click)="confirmDeleteVersion(doc, ver.versionNumber)" title="Delete Version {{ ver.versionNumber }}">
+                          <button class="btn btn-danger btn-sm" (click)="confirmDeleteVersion(doc, ver.versionNumber)" title="Delete">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
                             Delete
                           </button>

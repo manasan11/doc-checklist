@@ -275,25 +275,24 @@ class DataStore {
       };
     });
 
-    // Requirement 8: Sort documents by upload date, with latest upload appearing first
-    const versionsDesc = [...versions].reverse();
-    const latestActive = versionsDesc[0];
+    // Chronological order: first uploaded first, re-uploads below
+    const firstActive = versions[0];
 
     docItem.uploadStatus = 'Uploaded';
-    docItem.verificationStatus = latestActive.verificationStatus;
-    docItem.approvalStatus = latestActive.approvalStatus;
-    docItem.rejectionReason = (latestActive.verificationStatus === 2 && latestActive.rejectionReason)
-      ? String(latestActive.rejectionReason)
+    docItem.verificationStatus = firstActive.verificationStatus;
+    docItem.approvalStatus = firstActive.approvalStatus;
+    docItem.rejectionReason = (firstActive.verificationStatus === 2 && firstActive.rejectionReason)
+      ? String(firstActive.rejectionReason)
       : (docItem.adminFeedback || '');
-    docItem.isLocked = (latestActive.verificationStatus === 1 || latestActive.approvalStatus === 'Approved');
-    docItem.fileName = latestActive.fileName;
-    docItem.webViewLink = latestActive.webViewLink;
-    docItem.downloadUrl = latestActive.downloadUrl;
-    docItem.driveFileId = latestActive.driveFileId || docItem.driveFileId;
-    docItem.notes = latestActive.notes || docItem.notes || '';
+    docItem.isLocked = (firstActive.verificationStatus === 1 || firstActive.approvalStatus === 'Approved');
+    docItem.fileName = firstActive.fileName;
+    docItem.webViewLink = firstActive.webViewLink;
+    docItem.downloadUrl = firstActive.downloadUrl;
+    docItem.driveFileId = firstActive.driveFileId || docItem.driveFileId;
+    docItem.notes = firstActive.notes || docItem.notes || '';
     docItem.currentVersion = activeRecords.length;
-    docItem.uploadDateTime = latestActive.uploadDateTime || null;
-    docItem.versions = versionsDesc;
+    docItem.uploadDateTime = firstActive.uploadDateTime || null;
+    docItem.versions = versions;
   }
 
   async getOrLoadUserDocuments(userId) {
