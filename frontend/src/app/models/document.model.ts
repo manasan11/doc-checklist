@@ -20,6 +20,8 @@ export interface DocumentVersion {
   storageType: string;
   notes?: string;
   approvalStatusAtUpload: string;
+  verificationStatus?: number;
+  rejectionReason?: string;
 }
 
 export interface DocumentItem {
@@ -28,6 +30,7 @@ export interface DocumentItem {
   description: string;
   uploadStatus: 'Upload Pending' | 'Uploaded' | 'Verifying' | 'Accepted' | 'Rejected';
   approvalStatus: 'Pending' | 'Approved' | 'Rejected' | 'Accepted';
+  verificationStatus?: number; // 0=Pending, 1=Approved, 2=Rejected
   isLocked: boolean;
   currentVersion: number;
   uploadDateTime: string | null;
@@ -41,6 +44,7 @@ export interface DocumentItem {
   storageType: string | null;
   notes: string;
   adminFeedback: string;
+  rejectionReason?: string;
   versions: DocumentVersion[];
   permissions: DocumentPermissions;
 }

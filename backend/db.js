@@ -222,21 +222,23 @@ async function loadAllActiveStudentDocuments() {
 /**
  * Insert a newly uploaded or re-uploaded document into student_document table.
  */
-async function insertStudentDocument(studentCode, fileName, docId, docName, driveLink, notes = '') {
+async function insertStudentDocument(studentCode, fileName, docId, docName, driveLink, notes = '', assignedStaff = null, verificationStatus = 0) {
   const pool = getPool();
   if (!pool || !studentCode) return null;
   try {
     const [res] = await pool.query(`
       INSERT INTO student_document (
-        Student_Id, Entry_date, File_Name, Document_Id, Document_Name, Image, Description, DeleteStatus
-      ) VALUES (?, CURDATE(), ?, ?, ?, ?, ?, 0)
+        Student_Id, Entry_date, File_Name, Document_Id, Document_Name, Image, Description, DeleteStatus, Assigned_Staff, Verification_Status
+      ) VALUES (?, CURDATE(), ?, ?, ?, ?, ?, 0, ?, ?)
     `, [
       studentCode,
       fileName,
       docId,
       docName,
       driveLink,
-      notes || ''
+      notes || '',
+      assignedStaff || null,
+      verificationStatus !== undefined && verificationStatus !== null ? Number(verificationStatus) : 0
     ]);
     return res?.insertId || null;
   } catch (err) {
@@ -322,6 +324,134 @@ async function upsertStudent(studentCode, name, email, username, password) {
   }
 }
 
+/**
+ * Update student profile details directly in MySQL student table.
+ */
+async function updateStudentDetails(studentId, { name, email, username, phone, department, password } = {}) {
+  const pool = getPool();
+  if (!pool || !studentId) return false;
+  const cleanId = String(studentId).replace(/^u-/, '').trim();
+  const sets = [];
+  const params = [];
+
+  if (name !== undefined) {
+    sets.push('Student_Name = ?');
+    params.push(String(name).trim());
+  }
+  if (email !== undefined) {
+    sets.push('Email = ?');
+    params.push(String(email).trim());
+  }
+  if (username !== undefined) {
+    sets.push('Username = ?');
+    params.push(String(username).trim());
+  }
+  if (phone !== undefined) {
+    sets.push('Phone_Number = ?');
+    params.push(String(phone).trim());
+  }
+  if (department !== undefined) {
+    sets.push('Proceeding_Course_Name = ?');
+    params.push(String(department).trim());
+  }
+  if (password !== undefined && password) {
+    sets.push('Password = ?');
+    params.push(String(password).trim());
+  }
+
+  if (sets.length === 0) return true;
+
+  params.push(cleanId, cleanId);
+  try {
+    const [res] = await pool.query(
+      `UPDATE student SET ${sets.join(', ')} WHERE (Student_Id = ? OR Unique_Id = ?) AND (DeleteStatus = 0 OR DeleteStatus IS NULL)`,
+      params
+    );
+    return Boolean(res && (res.affectedRows > 0 || res.changedRows >= 0));
+  } catch (err) {
+    console.warn('[DB Query] updateStudentDetails error:', err.message);
+    return false;
+  }
+}
+
+/**
+ * Fetch followup record by Student_Id and Dept_Id, retrieving the assigned User_Id.
+ */
+async function getFollowupUserByStudentAndDept(studentId, deptId = null) {
+  const pool = getPool();
+  if (!pool || !studentId) return null;
+  const cleanStudent = String(studentId).replace(/^u-/, '').trim();
+  const cleanDept = deptId ? String(deptId).trim() : null;
+
+  try {
+    let query = 'SELECT Student_FollowUp_Id, Student_Id, Department, Dept_Name, User_Id, UserName, Entry_date FROM student_followup WHERE Student_Id = ?';
+    const params = [cleanStudent];
+    if (cleanDept) {
+      query += ' AND (Department = ? OR Dept_Name = ?)';
+      params.push(cleanDept, cleanDept);
+    }
+    query += ' AND (DeleteStatus = 0 OR DeleteStatus IS NULL) ORDER BY Entry_date DESC, Student_FollowUp_Id DESC LIMIT 1';
+
+    const [rows] = await pool.query(query, params);
+    if (rows && rows.length > 0) {
+      return rows[0];
+    }
+    // If specific deptId had no exact match, return latest active followup for that student
+    if (cleanDept) {
+      const [fallbackRows] = await pool.query(
+        'SELECT Student_FollowUp_Id, Student_Id, Department, Dept_Name, User_Id, UserName, Entry_date FROM student_followup WHERE Student_Id = ? AND (DeleteStatus = 0 OR DeleteStatus IS NULL) ORDER BY Entry_date DESC, Student_FollowUp_Id DESC LIMIT 1',
+        [cleanStudent]
+      );
+      if (fallbackRows && fallbackRows.length > 0) return fallbackRows[0];
+    }
+    return null;
+  } catch (err) {
+    console.warn('[DB Query] getFollowupUserByStudentAndDept error:', err.message);
+    return null;
+  }
+}
+
+/**
+ * Update Assigned_Staff in student_document table for a student.
+ */
+async function updateStudentDocumentStaff(studentId, staffId) {
+  const pool = getPool();
+  if (!pool || !studentId || !staffId) return false;
+  const cleanId = String(studentId).replace(/^u-/, '').trim();
+  try {
+    const [res] = await pool.query(
+      'UPDATE student_document SET Assigned_Staff = ? WHERE Student_Id = ? AND (DeleteStatus = 0 OR DeleteStatus IS NULL)',
+      [staffId, cleanId]
+    );
+    return Boolean(res && res.affectedRows > 0);
+  } catch (err) {
+    console.warn('[DB Query] updateStudentDocumentStaff error:', err.message);
+    return false;
+  }
+}
+
+/**
+ * Update Verification_Status in student_document table.
+ * 0: Pending, 1: Approved, 2: Rejected
+ */
+async function updateStudentDocumentVerificationStatus(studentId, docId, status, rejectionReason = null) {
+  const pool = getPool();
+  if (!pool || !studentId || docId === undefined) return false;
+  const cleanId = String(studentId).replace(/^u-/, '').trim();
+  const vStatus = Number(status) || 0;
+  const reasonVal = vStatus === 2 ? (rejectionReason ? String(rejectionReason).trim() : null) : null;
+  try {
+    const [res] = await pool.query(
+      'UPDATE student_document SET Verification_Status = ?, rejection_reason = ? WHERE Student_Id = ? AND Document_Id = ? AND (DeleteStatus = 0 OR DeleteStatus IS NULL)',
+      [vStatus, reasonVal, cleanId, docId]
+    );
+    return Boolean(res && res.affectedRows > 0);
+  } catch (err) {
+    console.warn('[DB Query] updateStudentDocumentVerificationStatus error:', err.message);
+    return false;
+  }
+}
+
 module.exports = {
   getPool,
   initDatabase,
@@ -330,6 +460,10 @@ module.exports = {
   // Stored Query Methods
   findUserByIdentifier,
   updateUserPassword,
+  updateStudentDetails,
+  getFollowupUserByStudentAndDept,
+  updateStudentDocumentStaff,
+  updateStudentDocumentVerificationStatus,
   updateUserDriveFolder,
   loadActiveStudents,
   loadAllActiveStudentDocuments,

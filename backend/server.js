@@ -49,7 +49,7 @@ function authenticateToken(req, res, next) {
           user = dataStore.findUserByEmailOrUsername(decoded.email);
         }
         if (user) {
-          req.user = { id: user.id, email: targetEmail, name: user.name, role: user.role };
+          req.user = { id: user.id, email: user.email, name: user.name, role: user.role };
           return next();
         }
         // Fallback if user ID changed but email matches
@@ -58,7 +58,9 @@ function authenticateToken(req, res, next) {
           return next();
         }
       }
-    } catch (_) {}
+    } catch (tokenErr) {
+      console.warn('[Auth] Token error:', tokenErr.message);
+    }
   }
 
   // 2. Resolve user by header ID or Email
@@ -148,6 +150,7 @@ app.post('/api/auth/forgot-password', async (req, res) => {
       console.warn('[Forgot Password] DB query error:', dbErr.message);
     }
 
+    if (explicitStaff && user) user.assignedStaff = explicitStaff;
     if (!user) {
       user = dataStore.findUserByEmailOrUsername(trimmedInput);
     }
@@ -316,11 +319,35 @@ app.get('/api/auth/me', authenticateToken, (req, res) => {
 
 // ======================== DOCUMENT CHECKLIST ROUTES ========================
 
-// 1. Get Document Checklist (with optional auto-sync from Google Drive)
+// 1. Get Document Checklist (with optional auto-sync from Google Drive & Followup integration)
 app.get('/api/documents', authenticateToken, async (req, res) => {
-  const targetUserId = (req.user.role === 'admin' && req.query.userId) 
+  const studentIdParam = req.query.studentId || req.query.Student_Id;
+  const deptIdParam = req.query.deptId || req.query.Dept_Id || req.query.departmentId;
+
+  let followup = null;
+  let targetUserId = (req.user.role === 'admin' && req.query.userId) 
     ? req.query.userId 
-    : req.user.id;
+    : (studentIdParam ? `u-${String(studentIdParam).replace(/^u-/, '')}` : req.user.id);
+
+  if (studentIdParam || deptIdParam) {
+    try {
+      const lookupStudent = studentIdParam || targetUserId;
+      const fRecord = await db.getFollowupUserByStudentAndDept(lookupStudent, deptIdParam);
+      if (fRecord) {
+        followup = {
+          studentFollowUpId: fRecord.Student_FollowUp_Id,
+          studentId: fRecord.Student_Id,
+          departmentId: fRecord.Department,
+          departmentName: fRecord.Dept_Name,
+          userId: fRecord.User_Id,
+          userName: fRecord.UserName,
+          entryDate: fRecord.Entry_date
+        };
+      }
+    } catch (fErr) {
+      console.warn('[Followup Lookup Notice]:', fErr.message);
+    }
+  }
 
   // Optional on-demand Drive sync: /api/documents?sync=true
   if (req.query.sync === 'true' || req.query.syncDrive === 'true') {
@@ -337,6 +364,10 @@ app.get('/api/documents', authenticateToken, async (req, res) => {
   const documents = await dataStore.getOrLoadUserDocuments(targetUserId);
   return res.json({
     userId: targetUserId,
+    studentId: studentIdParam || String(targetUserId).replace(/^u-/, ''),
+    associatedUserId: followup ? followup.userId : null,
+    associatedUserName: followup ? followup.userName : null,
+    followup,
     totalDocuments: documents.length,
     uploadedCount: documents.filter(d => d.uploadStatus === 'Uploaded').length,
     approvedCount: documents.filter(d => d.approvalStatus === 'Approved').length,
@@ -344,6 +375,62 @@ app.get('/api/documents', authenticateToken, async (req, res) => {
     rejectedCount: documents.filter(d => d.approvalStatus === 'Rejected').length,
     documents
   });
+});
+
+// 1b. Direct Endpoint: Get Student Documents via Followup table (Student_Id & Dept_Id)
+app.get(['/api/students/:studentId/documents', '/api/students/:studentId/followup-documents'], authenticateToken, async (req, res) => {
+  let studentId = req.params.studentId;
+  const deptId = req.query.deptId || req.query.Dept_Id || req.query.departmentId;
+
+  if (!studentId || studentId === ':studentId' || studentId.startsWith(':')) {
+    studentId = (req.user && req.user.id) ? String(req.user.id).replace(/^u-/, '') : '8755';
+  }
+
+  if (!studentId) {
+    return res.status(400).json({ error: 'Student_Id is required.' });
+  }
+
+  try {
+    const cleanStudentCode = String(studentId).replace(/^u-/, '').trim();
+    const followupRecord = await db.getFollowupUserByStudentAndDept(cleanStudentCode, deptId);
+
+    const associatedUserId = followupRecord ? followupRecord.User_Id : null;
+    const associatedUserName = followupRecord ? followupRecord.UserName : null;
+
+    if (associatedUserId && db.updateStudentDocumentStaff) {
+      try {
+        await db.updateStudentDocumentStaff(cleanStudentCode, associatedUserId);
+      } catch (_) {}
+    }
+
+    const targetUserId = `u-${cleanStudentCode}`;
+    const documents = await dataStore.getOrLoadUserDocuments(targetUserId);
+
+    return res.json({
+      studentId: cleanStudentCode,
+      deptId: deptId || (followupRecord ? followupRecord.Department : null),
+      associatedUserId,
+      associatedUserName,
+      followupRecord: followupRecord ? {
+        studentFollowUpId: followupRecord.Student_FollowUp_Id,
+        studentId: followupRecord.Student_Id,
+        departmentId: followupRecord.Department,
+        departmentName: followupRecord.Dept_Name,
+        userId: followupRecord.User_Id,
+        userName: followupRecord.UserName,
+        entryDate: followupRecord.Entry_date
+      } : null,
+      totalDocuments: documents.length,
+      uploadedCount: documents.filter(d => d.uploadStatus === 'Uploaded').length,
+      approvedCount: documents.filter(d => d.approvalStatus === 'Approved').length,
+      pendingCount: documents.filter(d => d.uploadStatus === 'Uploaded' && d.approvalStatus === 'Pending').length,
+      rejectedCount: documents.filter(d => d.approvalStatus === 'Rejected').length,
+      documents
+    });
+  } catch (err) {
+    console.error('[API] Error fetching student followup documents:', err);
+    return res.status(500).json({ error: 'Failed to fetch student documents: ' + err.message });
+  }
 });
 
 // 2. Get All Documents across users (Admin overview)
@@ -365,6 +452,67 @@ app.get('/api/students', authenticateToken, async (req, res) => {
     totalStudents: students.length,
     students
   });
+});
+
+// 2c. Update Student Details
+app.put('/api/students/:id', authenticateToken, async (req, res) => {
+  const studentId = req.params.id;
+  const { name, email, username, phone, department, password } = req.body || {};
+
+  if (!studentId) {
+    return res.status(400).json({ error: 'Student ID is required.' });
+  }
+
+  try {
+    const cleanId = String(studentId).replace(/^u-/, '').trim();
+    const dbSuccess = await db.updateStudentDetails(cleanId, { name, email, username, phone, department, password });
+
+    const updates = {};
+    if (name !== undefined) updates.name = name;
+    if (email !== undefined) updates.email = email;
+    if (username !== undefined) updates.username = username;
+    if (department !== undefined) updates.department = department;
+
+    dataStore.updateStudentInCache(cleanId, updates);
+
+    return res.json({
+      message: 'Student details updated successfully.',
+      studentId: cleanId,
+      dbUpdated: dbSuccess,
+      updatedFields: updates
+    });
+  } catch (err) {
+    console.error('[API] Error updating student:', err);
+    return res.status(500).json({ error: 'Failed to update student: ' + err.message });
+  }
+});
+
+app.patch('/api/students/:id', authenticateToken, async (req, res) => {
+  // Delegate patch to the same handler logic
+  const studentId = req.params.id;
+  const { name, email, username, phone, department, password } = req.body || {};
+
+  try {
+    const cleanId = String(studentId).replace(/^u-/, '').trim();
+    const dbSuccess = await db.updateStudentDetails(cleanId, { name, email, username, phone, department, password });
+
+    const updates = {};
+    if (name !== undefined) updates.name = name;
+    if (email !== undefined) updates.email = email;
+    if (username !== undefined) updates.username = username;
+    if (department !== undefined) updates.department = department;
+
+    dataStore.updateStudentInCache(cleanId, updates);
+
+    return res.json({
+      message: 'Student details updated successfully.',
+      studentId: cleanId,
+      dbUpdated: dbSuccess,
+      updatedFields: updates
+    });
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to update student: ' + err.message });
+  }
 });
 
 // 3. Get Single Document with full version history
@@ -508,6 +656,7 @@ const handleDocumentUpload = async (req, res) => {
     ? requestedUserId
     : req.user.id;
   const userNotes = req.body.notes || '';
+  const explicitStaff = req.body.assignedStaff || req.body.staffId || req.query.assignedStaff || req.query.staffId;
   const requestedDocType = (req.body.documentType || req.body.docType || '').trim();
 
   if (!req.file) {
@@ -620,24 +769,35 @@ app.put('/api/documents/:id', authenticateToken, (req, res) => {
   }
 });
 
-// 6. Admin Review & Lock Document
-app.patch('/api/documents/:id/review', authenticateToken, (req, res) => {
-  if (req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Admin permission required to review documents.' });
-  }
-
+// 6. Admin Review & Lock Document (supports Verification_Status: 0=Pending, 1=Approved, 2=Rejected)
+app.patch(['/api/documents/:id/review', '/api/documents/:id/verification-status'], authenticateToken, async (req, res) => {
   const docId = parseInt(req.params.id, 10);
-  const targetUserId = req.body.userId || 'u-1';
-  const { approvalStatus, isLocked, adminFeedback } = req.body;
+  const requestedUserId = req.body?.userId || req.query.userId || req.body?.studentId || req.query.studentId;
+  const targetUserId = (req.user.role === 'admin' && requestedUserId)
+    ? requestedUserId
+    : (requestedUserId || req.user.id);
+
+  let { approvalStatus, verificationStatus, status, rejectionReason, rejection_reason, reason, isLocked, adminFeedback } = req.body || {};
+  if (status !== undefined && verificationStatus === undefined) {
+    verificationStatus = status;
+  }
+  const effectiveReason = rejectionReason || rejection_reason || reason || adminFeedback;
 
   try {
     const updatedDoc = dataStore.adminReviewDocument(targetUserId, docId, {
       approvalStatus,
+      verificationStatus,
+      rejectionReason: effectiveReason,
       isLocked,
-      adminFeedback
+      adminFeedback: effectiveReason
     });
+
+    const statusLabel = updatedDoc.verificationStatus === 1 ? 'Approved' : (updatedDoc.verificationStatus === 2 ? 'Rejected' : 'Pending');
+
     return res.json({
-      message: `Document reviewed: ${approvalStatus || 'Status updated'}`,
+      message: `Document verification status updated: ${statusLabel} (Code: ${updatedDoc.verificationStatus})`,
+      verificationStatus: updatedDoc.verificationStatus,
+      approvalStatus: updatedDoc.approvalStatus,
       document: updatedDoc
     });
   } catch (err) {

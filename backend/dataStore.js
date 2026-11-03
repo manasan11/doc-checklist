@@ -151,6 +151,23 @@ class DataStore {
     return this.cachedStudentList;
   }
 
+  updateStudentInCache(studentId, updates = {}) {
+    const cleanId = String(studentId).replace(/^u-/, '').trim();
+    if (this.cachedStudentList && Array.isArray(this.cachedStudentList)) {
+      const idx = this.cachedStudentList.findIndex(s => s.studentCode === cleanId || s.id === 'u-' + cleanId);
+      if (idx !== -1) {
+        this.cachedStudentList[idx] = {
+          ...this.cachedStudentList[idx],
+          ...updates
+        };
+      }
+    }
+    const user = this.data.users ? this.data.users.find(u => u.studentCode === cleanId || u.id === 'u-' + cleanId) : null;
+    if (user) {
+      Object.assign(user, updates);
+    }
+  }
+
   matchDocumentTo11List(userDocs, docId, docName) {
     const clean = String(docName || '').toLowerCase().trim();
 
@@ -264,7 +281,21 @@ class DataStore {
           const driveFileIdMatch = (latestDriveUrl || '').match(/\/file\/d\/([^\/]+)/);
           const latestDriveId = driveFileIdMatch ? driveFileIdMatch[1] : null;
 
+          // Dynamic Verification_Status from MySQL (0: Pending, 1: Approved, 2: Rejected)
+          let vStatus = 0;
+          let aStatus = 'Pending';
+          if (latestActive.Verification_Status !== undefined && latestActive.Verification_Status !== null) {
+            vStatus = Number(latestActive.Verification_Status);
+            if (vStatus === 1) aStatus = 'Approved';
+            else if (vStatus === 2) aStatus = 'Rejected';
+            else aStatus = 'Pending';
+          }
+
           docItem.uploadStatus = 'Uploaded';
+          docItem.verificationStatus = vStatus;
+          docItem.approvalStatus = aStatus;
+          docItem.rejectionReason = latestActive.rejection_reason || latestActive.rejectionReason || docItem.adminFeedback || '';
+          docItem.isLocked = (vStatus === 1 || aStatus === 'Approved');
           docItem.fileName = latestActive.File_Name;
           docItem.webViewLink = latestDriveUrl;
           docItem.downloadUrl = latestDriveUrl;
@@ -275,6 +306,14 @@ class DataStore {
           docItem.versions = activeRecords.map((r, idx) => {
             const verDriveUrl = toGoogleDriveViewUrl(r.Image);
             const verIdMatch = (verDriveUrl || '').match(/\/file\/d\/([^\/]+)/);
+            let verVStatus = 0;
+            let verAStatus = 'Pending';
+            if (r.Verification_Status !== undefined && r.Verification_Status !== null) {
+              verVStatus = Number(r.Verification_Status);
+              if (verVStatus === 1) verAStatus = 'Approved';
+              else if (verVStatus === 2) verAStatus = 'Rejected';
+              else verAStatus = 'Pending';
+            }
             return {
               versionNumber: idx + 1,
               fileName: r.File_Name,
@@ -283,7 +322,9 @@ class DataStore {
               driveFileId: verIdMatch ? verIdMatch[1] : null,
               notes: r.Description || '',
               uploadDateTime: r.Entry_date ? new Date(r.Entry_date).toLocaleDateString() : null,
-              studentDocumentId: r.Student_Document_Id
+              studentDocumentId: r.Student_Document_Id,
+              verificationStatus: verVStatus,
+              approvalStatus: verAStatus
             };
           });
         }
@@ -716,13 +757,21 @@ class DataStore {
 
       // 2. Direct insert into student_document table via stored query in db.js
       if (studentCode) {
+        let assignedStaff = user?.assignedStaff || null;
+        if (!assignedStaff && db.getFollowupUserByStudentAndDept) {
+          try {
+            const followup = await db.getFollowupUserByStudentAndDept(studentCode);
+            if (followup && followup.User_Id) assignedStaff = followup.User_Id;
+          } catch (_) {}
+        }
         return await db.insertStudentDocument(
           studentCode,
           fileResult.fileName || doc.fileName || doc.name,
           doc.id,
           doc.name,
           directDriveLink,
-          userNotes || doc.notes || ''
+          userNotes || doc.notes || '',
+          assignedStaff
         );
       }
       return null;
@@ -896,22 +945,49 @@ class DataStore {
   }
 
   // Admin Review and Lock Methods
-  adminReviewDocument(userId, docId, { approvalStatus, isLocked, adminFeedback }) {
+  adminReviewDocument(userId, docId, { approvalStatus, verificationStatus, rejectionReason, isLocked, adminFeedback }) {
     const user = this.findUserById(userId);
     if (!user) throw new Error("User not found");
 
     const doc = user.documents.find(d => d.id === parseInt(docId, 10));
     if (!doc) throw new Error("Document not found");
 
-    if (approvalStatus) {
+    let vStatus = verificationStatus !== undefined && verificationStatus !== null ? Number(verificationStatus) : null;
+    if (vStatus !== null) {
+      if (vStatus === 1) doc.approvalStatus = 'Approved';
+      else if (vStatus === 2) doc.approvalStatus = 'Rejected';
+      else doc.approvalStatus = 'Pending';
+      doc.verificationStatus = vStatus;
+    } else if (approvalStatus) {
       if (!["Pending", "Approved", "Rejected"].includes(approvalStatus)) {
         throw new Error("Invalid approval status");
       }
       doc.approvalStatus = approvalStatus;
+      doc.verificationStatus = (approvalStatus === 'Approved' ? 1 : (approvalStatus === 'Rejected' ? 2 : 0));
+      vStatus = doc.verificationStatus;
+    }
+
+    if (vStatus !== null) {
+      try {
+        const db = require('./db');
+        const cleanCode = user.studentCode || String(userId).replace(/^u-/, '');
+        const finalReason = rejectionReason !== undefined ? rejectionReason : (adminFeedback !== undefined ? adminFeedback : (vStatus === 2 ? doc.rejectionReason : ''));
+        if (vStatus === 2) {
+          doc.rejectionReason = finalReason || '';
+          doc.adminFeedback = doc.rejectionReason;
+        } else if (vStatus === 1 || vStatus === 0) {
+          doc.rejectionReason = '';
+        }
+        db.updateStudentDocumentVerificationStatus(cleanCode, doc.id, vStatus, doc.rejectionReason);
+      } catch (dbErr) {
+        console.warn('[DataStore] Error updating Verification_Status in MySQL:', dbErr.message);
+      }
     }
 
     if (typeof isLocked === 'boolean') {
       doc.isLocked = isLocked;
+    } else if (vStatus === 1) {
+      doc.isLocked = true;
     }
 
     if (adminFeedback !== undefined) {

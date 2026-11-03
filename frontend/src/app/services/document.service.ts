@@ -206,4 +206,38 @@ export class DocumentService {
       }))
     );
   }
+
+  /**
+   * Fetch documents and associated followup staff info using Student_Id and Dept_Id
+   */
+  getStudentFollowupDocuments(studentId: string, deptId?: string | number): Observable<any> {
+    const cleanId = String(studentId).replace(/^u-/, '');
+    let url = `${API_URL}/students/${encodeURIComponent(cleanId)}/documents`;
+    if (deptId) {
+      url += `?deptId=${encodeURIComponent(String(deptId))}`;
+    }
+    return this.http.get<any>(url, { headers: this.authService.getAuthHeaders() });
+  }
+
+  /**
+   * Update student profile details
+   */
+  updateStudent(studentId: string, data: any): Observable<any> {
+    const cleanId = String(studentId).replace(/^u-/, '');
+    return this.http.put<any>(`${API_URL}/students/${encodeURIComponent(cleanId)}`, data, {
+      headers: this.authService.getAuthHeaders()
+    });
+  }
+
+  /**
+   * Update Verification_Status in MySQL (0: Pending, 1: Approved, 2: Rejected)
+   */
+  updateVerificationStatus(docId: number, status: number, userId?: string, rejectionReason?: string): Observable<any> {
+    const payload: any = { verificationStatus: status };
+    if (userId) payload.userId = userId;
+    if (rejectionReason !== undefined) payload.rejectionReason = rejectionReason;
+    return this.http.patch<any>(`${API_URL}/documents/${docId}/review`, payload, {
+      headers: this.authService.getAuthHeaders()
+    });
+  }
 }
