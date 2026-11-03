@@ -319,9 +319,8 @@ class DataStore {
 
       const stuDocs = await db.getStudentUploadedDocuments(studentCode, legacyNumId);
 
-      // Group active records by target document ID or create dynamic entries
+      // Group active records by target document ID (strictly matching 1..11)
       const matchedMap = new Map();
-      const customDocsMap = new Map();
 
       for (const sd of stuDocs) {
         if (sd.DeleteStatus === 1) continue;
@@ -333,15 +332,6 @@ class DataStore {
             matchedMap.set(matched.id, []);
           }
           matchedMap.get(matched.id).push(sd);
-        } else {
-          // Document not in standard 11 templates (e.g. Birth Certificate ID: 86, Conditional Offer Letter ID: 94)
-          const customKey = (sd.Document_Id !== undefined && sd.Document_Id !== null)
-            ? Number(sd.Document_Id)
-            : String(sd.Document_Name || `doc_${sd.Student_Document_Id}`).toLowerCase().trim();
-          if (!customDocsMap.has(customKey)) {
-            customDocsMap.set(customKey, []);
-          }
-          customDocsMap.get(customKey).push(sd);
         }
       }
 
@@ -353,64 +343,10 @@ class DataStore {
         }
       }
 
-      // Add custom / direct DB documents that were not part of standard 1..11
-      for (const [customKey, activeRecords] of customDocsMap.entries()) {
-        if (!activeRecords || activeRecords.length === 0) continue;
-        const latest = activeRecords[activeRecords.length - 1];
-        let docId = typeof customKey === 'number' ? customKey : (latest.Document_Id ? Number(latest.Document_Id) : null);
-        if (!docId || userDocs.some(d => d.id === docId)) {
-          docId = userDocs.reduce((max, d) => Math.max(max, d.id || 0), 0) + 1;
-        }
-        const docName = latest.Document_Name || `Document ${docId}`;
-
-        const newDocItem = {
-          id: docId,
-          name: docName,
-          description: latest.Description || `Uploaded ${docName}`,
-          uploadStatus: "Upload Pending",
-          approvalStatus: "Pending",
-          verificationStatus: 0,
-          rejectionReason: "",
-          isLocked: false,
-          currentVersion: 0,
-          uploadDateTime: null,
-          driveFileId: null,
-          fileName: null,
-          savedFileName: null,
-          fileSize: null,
-          mimeType: null,
-          webViewLink: null,
-          downloadUrl: null,
-          storageType: 'google_drive_cloud',
-          notes: "",
-          adminFeedback: "",
-          versions: []
-        };
-        this.populateDocWithRecords(newDocItem, activeRecords);
-        userDocs.push(newDocItem);
-      }
-
-      // Deduplicate userDocs by doc.id
-      const seenIds = new Set();
-      const uniqueDocs = [];
-      for (const d of userDocs) {
-        if (!seenIds.has(d.id)) {
-          seenIds.add(d.id);
-          uniqueDocs.push(d);
-        }
-      }
-
-      // Keep standard checklist 1..11 first, followed by additional custom documents
-      uniqueDocs.sort((a, b) => {
-        const aIsStandard = a.id >= 1 && a.id <= 11;
-        const bIsStandard = b.id >= 1 && b.id <= 11;
-        if (aIsStandard && bIsStandard) return a.id - b.id;
-        if (aIsStandard) return -1;
-        if (bIsStandard) return 1;
-        return a.id - b.id;
-      });
-
-      user.documents = uniqueDocs;
+      // Strictly enforce ONLY the first 11 documents (numbered 1 to 11)
+      user.documents = userDocs
+        .filter(d => d.id >= 1 && d.id <= 11)
+        .sort((a, b) => a.id - b.id);
 
       return user.documents.map(doc => ({
         ...doc,
