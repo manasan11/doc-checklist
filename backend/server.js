@@ -137,11 +137,6 @@ app.post('/api/auth/forgot-password', async (req, res) => {
       return res.status(400).json({ error: 'Email address or username is required' });
     }
 
-    // Refresh state from MySQL to ensure deleted users cannot request password resets
-    try {
-      await dataStore.loadFromMysql();
-    } catch (_) {}
-
     const trimmedInput = email.trim();
     const cleanLower = trimmedInput.toLowerCase();
 
@@ -247,7 +242,6 @@ app.post('/api/auth/reset-password', async (req, res) => {
   try {
     if (result.email) {
       await db.updateUserPassword(result.studentCode || null, result.email, result.username || null, newPassword);
-      await dataStore.loadFromMysql();
     }
   } catch (err) {
     console.warn('[MySQL] Notice updating password in student/users table:', err.message);
@@ -287,7 +281,6 @@ app.post('/api/auth/change-password', authenticateToken, async (req, res) => {
     const cleanUsername = (user?.username || '').toLowerCase().trim();
 
     await db.updateUserPassword(studentCode, cleanEmail, cleanUsername, newPassword);
-    await dataStore.loadFromMysql();
   } catch (err) {
     console.warn('[MySQL] Notice updating password in student/users table:', err.message);
   }
@@ -319,11 +312,6 @@ app.get('/api/documents', authenticateToken, async (req, res) => {
     ? req.query.userId 
     : req.user.id;
 
-  // Refresh latest state from MySQL so changes made in MySQL Workbench appear immediately in the app
-  try {
-    await dataStore.loadFromMysql();
-  } catch (_) {}
-
   // Optional on-demand Drive sync: /api/documents?sync=true
   if (req.query.sync === 'true' || req.query.syncDrive === 'true') {
     try {
@@ -336,7 +324,7 @@ app.get('/api/documents', authenticateToken, async (req, res) => {
     }
   }
 
-  const documents = dataStore.getUserDocuments(targetUserId);
+  const documents = await dataStore.getOrLoadUserDocuments(targetUserId);
   return res.json({
     userId: targetUserId,
     totalDocuments: documents.length,
@@ -362,23 +350,7 @@ app.get('/api/documents/all', authenticateToken, (req, res) => {
 
 // 2b. Get All Students dynamically from MySQL database
 app.get('/api/students', authenticateToken, async (req, res) => {
-  try {
-    await dataStore.loadFromMysql();
-  } catch (_) {}
-
-  const students = (dataStore.data.users || [])
-    .filter(u => u.role !== 'admin')
-    .map(u => ({
-      id: u.id,
-      studentCode: u.studentCode || (u.id ? String(u.id).replace(/^u-/, '') : null),
-      name: u.name,
-      email: u.email,
-      username: u.username,
-      department: u.department,
-      documentsCount: (u.documents || []).length,
-      uploadedCount: (u.documents || []).filter(d => d.uploadStatus === 'Uploaded').length
-    }));
-
+  const students = await dataStore.getStudentList();
   return res.json({
     totalStudents: students.length,
     students
@@ -416,6 +388,12 @@ async function ensureUserDriveFolder(user) {
 
   let folderId = user.driveFolderId;
   let folderName = user.driveFolderName || expectedFolderName;
+
+  // If already verified in this session, return immediately without Google Drive roundtrip
+  if (user.driveFolderVerified && folderId && !folderId.startsWith('gdrive_') && !folderId.startsWith('local_')) {
+    return { folderId, folderName };
+  }
+
   let needsCreation = false;
 
   // 1. Is folder ID empty or emulated?
@@ -459,6 +437,7 @@ async function ensureUserDriveFolder(user) {
     }
   }
 
+  user.driveFolderVerified = true;
   return { folderId, folderName };
 }
 
@@ -526,9 +505,13 @@ const handleDocumentUpload = async (req, res) => {
   }
 
   try {
-    const user = dataStore.findUserById(targetUserId);
+    const user = await dataStore.findOrLoadUser(targetUserId);
     if (!user) {
       return res.status(404).json({ error: 'User account not found' });
+    }
+
+    if (!user.documents || user.documents.length === 0) {
+      await dataStore.getOrLoadUserDocuments(targetUserId);
     }
 
     // Resolve existing document by ID or by Document Type name (Requirement 8)
@@ -730,7 +713,6 @@ app.post('/api/drive/sync', authenticateToken, async (req, res) => {
 // 4. Ensure & Synchronize All User Folders on Google Drive
 app.post('/api/drive/sync-folders', authenticateToken, async (req, res) => {
   try {
-    await dataStore.loadFromMysql();
     const count = await ensureAllUserFolders();
     const students = (dataStore.data.users || [])
       .filter(u => u.role !== 'admin')
@@ -1190,7 +1172,10 @@ function listenOnPort(port, retries = 3) {
 async function startServer() {
   try {
     await db.initDatabase();
-    await dataStore.loadFromMysql();
+    // Warm up template and student list in background without blocking server startup
+    dataStore.loadFromMysql().catch(err => {
+      console.warn('[DataStore Preload Notice]:', err.message);
+    });
   } catch (err) {
     console.warn('[MySQL Warning]:', err.message);
   }

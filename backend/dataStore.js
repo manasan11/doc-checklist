@@ -12,12 +12,7 @@ const INITIAL_DOCUMENTS = [
   { id: 8, name: "German CV", description: "Standard Europass / German format tabular CV (Lebenslauf)" },
   { id: 9, name: "Motivation Letter", description: "Personal statement of motivation (Anschreiben)" },
   { id: 10, name: "PCC", description: "Police Clearance Certificate (Criminal background check)" },
-  { id: 11, name: "Medical", description: "Medical fitness certificate and health examination report" },
-  { id: 12, name: "Aadhaar Card", description: "Uploaded Aadhaar Card" },
-  { id: 13, name: "PAN Card", description: "Uploaded PAN Card" },
-  { id: 14, name: "Resume", description: "Uploaded Resume" },
-  { id: 15, name: "Degree Certificate", description: "Uploaded Degree Certificate" },
-  { id: 16, name: "Special / Document : Test *", description: "Uploaded Special / Document : Test *" }
+  { id: 11, name: "Medical", description: "Medical fitness certificate and health examination report" }
 ];
 
 function toGoogleDriveViewUrl(urlOrPath, fallbackFileId = null) {
@@ -76,6 +71,9 @@ function getInitialData() {
 class DataStore {
   constructor() {
     this.data = getInitialData();
+    this.cachedStudentList = null;
+    this.masterDocTemplates = null;
+    this.knownMasterDocIds = new Set();
   }
 
   load() {
@@ -96,195 +94,219 @@ class DataStore {
     return;
   }
 
-  async loadFromMysql() {
+  async getMasterDocTemplates() {
+    if (this.masterDocTemplates && this.masterDocTemplates.length === INITIAL_DOCUMENTS.length) {
+      return this.masterDocTemplates;
+    }
+    // Strictly generate templates for the 11 required checklist documents (numbered 1 to 11)
+    this.masterDocTemplates = INITIAL_DOCUMENTS.map(d => ({
+      id: d.id,
+      name: d.name,
+      description: d.description,
+      uploadStatus: "Upload Pending",
+      approvalStatus: "Pending",
+      isLocked: false,
+      currentVersion: 0,
+      uploadDateTime: null,
+      driveFileId: null,
+      fileName: null,
+      savedFileName: null,
+      fileSize: null,
+      mimeType: null,
+      webViewLink: null,
+      downloadUrl: null,
+      storageType: 'google_drive_cloud',
+      notes: "",
+      adminFeedback: "",
+      versions: []
+    }));
+    this.knownMasterDocIds = new Set(this.masterDocTemplates.map(d => d.id));
+    return this.masterDocTemplates;
+  }
+
+  async getStudentList() {
+    if (this.cachedStudentList && this.cachedStudentList.length > 0) {
+      return this.cachedStudentList;
+    }
     try {
       const db = require('./db');
-
-      // 1. Load active students from MySQL student table via stored query in db.js
       const students = await db.loadActiveStudents();
-      if (!students || students.length === 0) return null;
-
-      // 2. Load master checklist template from document table via stored query in db.js
-      let masterDocs = await db.loadMasterDocuments();
-      if (!masterDocs || masterDocs.length === 0) {
-        masterDocs = INITIAL_DOCUMENTS.map(d => ({ Document_Id: d.id, Document_Name: d.name }));
-      }
-
-      const defaultDocTemplates = masterDocs.map(d => ({
-        id: d.Document_Id,
-        name: d.Document_Name,
-        description: `Uploaded ${d.Document_Name}`,
-        uploadStatus: "Upload Pending",
-        approvalStatus: "Pending",
-        isLocked: false,
-        currentVersion: 0,
-        uploadDateTime: null,
-        driveFileId: null,
-        fileName: null,
-        savedFileName: null,
-        fileSize: null,
-        mimeType: null,
-        webViewLink: null,
-        downloadUrl: null,
-        storageType: 'google_drive_cloud',
-        notes: "",
-        adminFeedback: "",
-        versions: []
-      }));
-
-      // Preserve admin user from local memory/file
-      const loadedUsers = (this.data && this.data.users ? this.data.users.filter(u => u.role === 'admin') : []);
-      if (loadedUsers.length === 0) {
-        loadedUsers.push({
-          id: "u-admin",
-          email: "admin@example.com",
-          username: "admin",
-          name: "Sarah Jenkins (Compliance Admin)",
-          password: "adminpassword",
-          role: "admin",
-          department: "Compliance & HR Audit",
-          documents: []
-        });
-      }
-
-      // 3. Bulk fetch all active uploaded documents in ONE fast query
-      const allActiveDocs = await db.loadAllActiveStudentDocuments();
-      const docsByStudentId = new Map();
-      for (const d of allActiveDocs) {
-        const studentKey = String(d.Student_Id || '').trim();
-        if (!docsByStudentId.has(studentKey)) {
-          docsByStudentId.set(studentKey, []);
-        }
-        docsByStudentId.get(studentKey).push(d);
-      }
-
-      const existingMemUsersById = new Map(((this.data && this.data.users) || []).map(u => [u.id, u]));
-
-      // 4. For each student, map their checklist and uploaded files
-      for (const s of students) {
+      this.cachedStudentList = (students || []).map(s => {
         const studentCode = String(s.Student_Id || s.Unique_Id || '').trim();
-        const sid = `u-${studentCode}`;
-        const userDocs = JSON.parse(JSON.stringify(defaultDocTemplates));
-
-        const numPart = studentCode.replace(/\D/g, '');
-        const legacyNumId = numPart ? parseInt(numPart, 10) : null;
-
-        // Get this student's uploaded documents from in-memory map instantly
-        const stuDocs = (docsByStudentId.get(studentCode) || [])
-          .concat(legacyNumId && String(legacyNumId) !== studentCode ? (docsByStudentId.get(String(legacyNumId)) || []) : []);
-
-        // Group student_document rows by Document_Id to support all re-uploaded files / versions
-        const docsByDocId = new Map();
-        for (const sd of stuDocs) {
-          if (!docsByDocId.has(sd.Document_Id)) {
-            docsByDocId.set(sd.Document_Id, []);
-          }
-          docsByDocId.get(sd.Document_Id).push(sd);
-        }
-
-        for (const [docId, records] of docsByDocId.entries()) {
-          const docItem = userDocs.find(d => d.id === docId);
-          const activeRecords = records.filter(r => r.DeleteStatus === 0 && r.File_Name);
-
-          if (docItem) {
-            if (activeRecords.length > 0) {
-              const latestActive = activeRecords[activeRecords.length - 1];
-              const latestDriveUrl = toGoogleDriveViewUrl(latestActive.Image);
-              const driveFileIdMatch = (latestDriveUrl || '').match(/\/file\/d\/([^\/]+)/);
-              const latestDriveId = driveFileIdMatch ? driveFileIdMatch[1] : null;
-
-              docItem.uploadStatus = 'Uploaded';
-              docItem.fileName = latestActive.File_Name;
-              docItem.webViewLink = latestDriveUrl;
-              docItem.downloadUrl = latestDriveUrl;
-              docItem.driveFileId = latestDriveId || docItem.driveFileId;
-              docItem.notes = latestActive.Description || '';
-              docItem.currentVersion = activeRecords.length;
-              docItem.uploadDateTime = latestActive.Entry_date ? new Date(latestActive.Entry_date).toLocaleDateString() : null;
-              docItem.versions = activeRecords.map((r, idx) => {
-                const verDriveUrl = toGoogleDriveViewUrl(r.Image);
-                const verIdMatch = (verDriveUrl || '').match(/\/file\/d\/([^\/]+)/);
-                return {
-                  versionNumber: idx + 1,
-                  fileName: r.File_Name,
-                  webViewLink: verDriveUrl,
-                  downloadUrl: verDriveUrl,
-                  driveFileId: verIdMatch ? verIdMatch[1] : null,
-                  notes: r.Description || '',
-                  uploadDateTime: r.Entry_date ? new Date(r.Entry_date).toLocaleDateString() : null,
-                  studentDocumentId: r.Student_Document_Id
-                };
-              });
-            } else {
-              docItem.uploadStatus = 'Upload Pending';
-              docItem.fileName = null;
-              docItem.webViewLink = null;
-              docItem.currentVersion = 0;
-              docItem.versions = [];
-            }
-          } else if (activeRecords.length > 0) {
-            // Custom document added in student_document
-            const latestActive = activeRecords[activeRecords.length - 1];
-            const latestDriveUrl = toGoogleDriveViewUrl(latestActive.Image);
-            const driveFileIdMatch = (latestDriveUrl || '').match(/\/file\/d\/([^\/]+)/);
-            const latestDriveId = driveFileIdMatch ? driveFileIdMatch[1] : null;
-
-            userDocs.push({
-              id: docId,
-              name: latestActive.Document_Name || `Document ${docId}`,
-              description: latestActive.Description || 'Uploaded document',
-              uploadStatus: 'Uploaded',
-              approvalStatus: 'Pending',
-              isLocked: false,
-              currentVersion: activeRecords.length,
-              uploadDateTime: latestActive.Entry_date ? new Date(latestActive.Entry_date).toLocaleDateString() : null,
-              fileName: latestActive.File_Name,
-              webViewLink: latestDriveUrl,
-              downloadUrl: latestDriveUrl,
-              driveFileId: latestDriveId,
-              notes: latestActive.Description || '',
-              adminFeedback: '',
-              versions: activeRecords.map((r, idx) => {
-                const verDriveUrl = toGoogleDriveViewUrl(r.Image);
-                const verIdMatch = (verDriveUrl || '').match(/\/file\/d\/([^\/]+)/);
-                return {
-                  versionNumber: idx + 1,
-                  fileName: r.File_Name,
-                  webViewLink: verDriveUrl,
-                  downloadUrl: verDriveUrl,
-                  driveFileId: verIdMatch ? verIdMatch[1] : null,
-                  notes: r.Description || '',
-                  uploadDateTime: r.Entry_date ? new Date(r.Entry_date).toLocaleDateString() : null,
-                  studentDocumentId: r.Student_Document_Id
-                };
-              })
-            });
-          }
-        }
-
-        // Preserve driveFolder info from existing in-memory user if available
-        const existingMemUser = existingMemUsersById.get(sid) || null;
-
-        loadedUsers.push({
-          id: sid,
-          email: s.Email,
-          username: s.Username || (s.Email ? s.Email.split('@')[0] : `student_${studentCode}`),
-          name: s.Student_Name,
-          password: s.Password || 'Password123',
-          role: 'user',
-          department: s.Proceeding_Course_Name || 'General Operations',
+        return {
+          id: `u-${studentCode}`,
           studentCode: studentCode,
-          driveFolderId: existingMemUser ? existingMemUser.driveFolderId : null,
-          driveFolderName: existingMemUser ? existingMemUser.driveFolderName : null,
-          documents: userDocs
-        });
-      }
+          name: s.Student_Name || s.Username || `Student ${studentCode}`,
+          email: s.Email || '',
+          username: s.Username || '',
+          department: s.Proceeding_Course_Name || 'General Operations',
+          documentsCount: 11,
+          uploadedCount: 0
+        };
+      });
+    } catch (err) {
+      console.warn('[DataStore] Error loading student list:', err.message);
+      this.cachedStudentList = [];
+    }
+    return this.cachedStudentList;
+  }
 
-      this.data.users = loadedUsers;
+  matchDocumentTo11List(userDocs, docId, docName) {
+    const clean = String(docName || '').toLowerCase().trim();
+
+    // 1. Prioritize matching by Document_Name keyword to strictly one of the 11 documents
+    if (clean) {
+      if (clean.includes('photo')) return userDocs.find(d => d.id === 1);
+      if (clean.includes('intro video') || clean.includes('intro_video') || clean.includes('self-introduction')) return userDocs.find(d => d.id === 2);
+      if (clean.includes('10th') || clean.includes('sslc') || clean.includes('matriculation') || clean.includes('secondary school')) return userDocs.find(d => d.id === 3);
+      if (clean.includes('plus two') || clean.includes('plus_two') || clean.includes('12th') || clean.includes('higher secondary')) return userDocs.find(d => d.id === 4);
+      if (clean.includes('language') || clean.includes('german language') || clean.includes('english language') || clean.includes('goethe') || clean.includes('telc')) return userDocs.find(d => d.id === 5);
+      if (clean.includes('recommendation') || clean.includes('lor')) return userDocs.find(d => d.id === 6);
+      if (clean.includes('childcare') || clean.includes('child care')) return userDocs.find(d => d.id === 7);
+      if (clean.includes('cv') || clean.includes('lebenslauf') || clean.includes('resume')) return userDocs.find(d => d.id === 8);
+      if (clean.includes('motivation') || clean.includes('anschreiben') || clean.includes('sop') || clean.includes('statement of purpose')) return userDocs.find(d => d.id === 9);
+      if (clean.includes('pcc') || clean.includes('police clearance') || clean.includes('criminal background')) return userDocs.find(d => d.id === 10);
+      if (clean.includes('medical') || clean.includes('health') || clean.includes('fitness')) return userDocs.find(d => d.id === 11);
+    }
+
+    // 2. Match by exact Document_Id 1 to 11 if docName was not specific
+    const numId = parseInt(docId, 10);
+    if (!isNaN(numId) && numId >= 1 && numId <= 11) {
+      const match = userDocs.find(d => d.id === numId);
+      if (match) return match;
+    }
+
+    return null;
+  }
+
+  async loadFromMysql() {
+    try {
+      // Pre-warm master templates and student list in background
+      await Promise.all([
+        this.getMasterDocTemplates(),
+        this.getStudentList()
+      ]);
       return this.data;
     } catch (err) {
-      console.error('[MySQL Load Notice]:', err.message);
-      return null;
+      console.warn('[DataStore] loadFromMysql notice:', err.message);
+      return this.data;
+    }
+  }
+
+  async findOrLoadUser(userId) {
+    if (!userId) return null;
+    const existing = this.findUserById(userId);
+    if (existing) return existing;
+
+    try {
+      const db = require('./db');
+      const rawId = String(userId).replace(/^u-/, '').trim();
+      const s = await db.findUserByIdentifier(rawId);
+      if (s) {
+        const studentCode = String(s.studentCode || rawId).trim();
+        const newUser = {
+          id: `u-${studentCode}`,
+          email: s.email || '',
+          username: s.username || s.email || `student_${studentCode}`,
+          name: s.name || `Student ${studentCode}`,
+          password: s.password || 'Password123',
+          role: 'user',
+          department: s.department || 'General Operations',
+          studentCode: studentCode,
+          driveFolderId: null,
+          driveFolderName: null,
+          documents: []
+        };
+        this.data.users.push(newUser);
+        return newUser;
+      }
+    } catch (err) {
+      console.warn('[DataStore] findOrLoadUser error:', err.message);
+    }
+    return null;
+  }
+
+  async getOrLoadUserDocuments(userId) {
+    const user = await this.findOrLoadUser(userId);
+    if (!user) return [];
+    if (user.role === 'admin') return [];
+
+    try {
+      const db = require('./db');
+      const defaultDocTemplates = await this.getMasterDocTemplates();
+      const userDocs = JSON.parse(JSON.stringify(defaultDocTemplates));
+
+      const studentCode = this.ensureStudentCode(user);
+      const numPart = studentCode ? studentCode.replace(/\D/g, '') : null;
+      const legacyNumId = numPart ? parseInt(numPart, 10) : null;
+
+      const stuDocs = await db.getStudentUploadedDocuments(studentCode, legacyNumId);
+
+      // Match each active record to one of the 11 documents
+      const docsByTargetId = new Map();
+      for (const sd of stuDocs) {
+        if (!sd.File_Name || sd.DeleteStatus === 1) continue;
+
+        const matched = this.matchDocumentTo11List(userDocs, sd.Document_Id, sd.Document_Name);
+        if (matched) {
+          if (!docsByTargetId.has(matched.id)) {
+            docsByTargetId.set(matched.id, []);
+          }
+          docsByTargetId.get(matched.id).push(sd);
+        }
+      }
+
+      for (const [targetDocId, activeRecords] of docsByTargetId.entries()) {
+        const docItem = userDocs.find(d => d.id === targetDocId);
+        if (docItem && activeRecords.length > 0) {
+          const latestActive = activeRecords[activeRecords.length - 1];
+          const latestDriveUrl = toGoogleDriveViewUrl(latestActive.Image);
+          const driveFileIdMatch = (latestDriveUrl || '').match(/\/file\/d\/([^\/]+)/);
+          const latestDriveId = driveFileIdMatch ? driveFileIdMatch[1] : null;
+
+          docItem.uploadStatus = 'Uploaded';
+          docItem.fileName = latestActive.File_Name;
+          docItem.webViewLink = latestDriveUrl;
+          docItem.downloadUrl = latestDriveUrl;
+          docItem.driveFileId = latestDriveId || docItem.driveFileId;
+          docItem.notes = latestActive.Description || '';
+          docItem.currentVersion = activeRecords.length;
+          docItem.uploadDateTime = latestActive.Entry_date ? new Date(latestActive.Entry_date).toLocaleDateString() : null;
+          docItem.versions = activeRecords.map((r, idx) => {
+            const verDriveUrl = toGoogleDriveViewUrl(r.Image);
+            const verIdMatch = (verDriveUrl || '').match(/\/file\/d\/([^\/]+)/);
+            return {
+              versionNumber: idx + 1,
+              fileName: r.File_Name,
+              webViewLink: verDriveUrl,
+              downloadUrl: verDriveUrl,
+              driveFileId: verIdMatch ? verIdMatch[1] : null,
+              notes: r.Description || '',
+              uploadDateTime: r.Entry_date ? new Date(r.Entry_date).toLocaleDateString() : null,
+              studentDocumentId: r.Student_Document_Id
+            };
+          });
+        }
+      }
+
+      // Strictly enforce only the 11 documents, in exact order 1..11
+      user.documents = userDocs
+        .filter(d => d.id >= 1 && d.id <= 11)
+        .sort((a, b) => a.id - b.id);
+
+      return user.documents.map(doc => ({
+        ...doc,
+        permissions: this.calculatePermissions(doc)
+      }));
+    } catch (err) {
+      console.warn('[DataStore] getOrLoadUserDocuments error:', err.message);
+      return (user.documents || [])
+        .filter(d => d.id >= 1 && d.id <= 11)
+        .sort((a, b) => a.id - b.id)
+        .map(doc => ({
+          ...doc,
+          permissions: this.calculatePermissions(doc)
+        }));
     }
   }
 
@@ -301,57 +323,42 @@ class DataStore {
 
   async authenticateUser(identifier, password) {
     if (!identifier || !password) return null;
-    const cleanId = identifier.trim();
+    const cleanId = String(identifier).trim();
     const cleanLower = cleanId.toLowerCase();
 
-    // 1. Strict check against MySQL database if connected
+    // 1. Instant check for Administrator in memory (0ms)
+    const adminUser = (this.data.users || []).find(u => 
+      u.role === 'admin' && 
+      ((u.username && u.username.toLowerCase() === cleanLower) || 
+       (u.email && u.email.toLowerCase() === cleanLower))
+    );
+    if (adminUser) {
+      const expectedPass = adminUser.password ? String(adminUser.password).trim() : 'adminpassword';
+      const match = expectedPass === String(password).trim();
+      if (!match) {
+        return { error: 'Incorrect password.' };
+      }
+      return adminUser;
+    }
+
+    // 2. Fast indexed check against MySQL student table (~30ms)
     try {
       const db = require('./db');
-      const pool = db.getPool();
-      if (pool) {
-        // Sync memory and database.json with current MySQL users (so deleted users vanish)
-        await this.loadFromMysql();
-
-        // 1a. Check student table first for student logins (Matches MySQL Workbench)
-        const [stuRows] = await pool.query(
-          'SELECT * FROM student WHERE (LOWER(TRIM(Username)) = ? OR LOWER(TRIM(Email)) = ? OR Student_Id = ?) AND (DeleteStatus = 0 OR DeleteStatus IS NULL)',
-          [cleanLower, cleanLower, cleanId]
-        );
-        if (stuRows && stuRows.length > 0) {
-          const s = stuRows[0];
-          const expectedPass = s.Password ? String(s.Password).trim() : 'Password123';
-          const match = expectedPass === String(password).trim();
-          if (!match) {
-            return { error: 'Incorrect password.' };
-          }
-          return this.findUserById(`u-${s.Student_Id}`) || {
-            id: `u-${s.Student_Id}`,
-            email: s.Email,
-            username: s.Username || s.Email,
-            name: s.Student_Name,
-            role: 'user',
-            department: s.Proceeding_Course_Name || 'General Operations'
-          };
+      const stu = await db.findUserByIdentifier(cleanId);
+      if (stu) {
+        const expectedPass = stu.password ? String(stu.password).trim() : 'Password123';
+        const match = expectedPass === String(password).trim();
+        if (!match) {
+          return { error: 'Incorrect password.' };
         }
-
-        // 1b. Check administrator login
-        const adminUser = (this.data.users || []).find(u => u.role === 'admin' && (u.username.toLowerCase() === cleanLower || u.email.toLowerCase() === cleanLower));
-        if (adminUser) {
-          const expectedPass = adminUser.password ? String(adminUser.password).trim() : 'adminpassword';
-          const match = expectedPass === String(password).trim();
-          if (!match) {
-            return { error: 'Incorrect password.' };
-          }
-          return adminUser;
-        }
-
-        return { error: 'Account not found. Only registered users in the database can log in.' };
+        const user = await this.findOrLoadUser(stu.id);
+        return user || stu;
       }
     } catch (err) {
       console.warn('[DataStore] Notice querying MySQL for login:', err.message);
     }
 
-    // 2. Fallback to local dataStore only if MySQL is not available
+    // 3. Fallback to local dataStore only if MySQL is not available
     this.data = this.load();
     const user = this.findUserByEmailOrUsername(cleanLower);
     if (!user) {
@@ -431,6 +438,11 @@ class DataStore {
       this.save();
     } else {
       let changed = false;
+      const filtered = user.documents.filter(d => INITIAL_DOCUMENTS.some(init => init.id === d.id));
+      if (filtered.length !== user.documents.length) {
+        user.documents = filtered;
+        changed = true;
+      }
       INITIAL_DOCUMENTS.forEach(initDoc => {
         let existing = user.documents.find(d => d.id === initDoc.id);
         if (!existing) {
@@ -696,8 +708,11 @@ class DataStore {
       const studentCode = user?.studentCode || (userId && userId.includes('STU') ? userId.replace(/^u-/, '') : `STU${String((userId || '').replace(/\D/g, '') || 1).padStart(3, '0')}`);
       const directDriveLink = toGoogleDriveViewUrl(fileResult.driveWebViewLink || fileResult.webViewLink, fileResult.driveFileId);
 
-      // 1. Ensure master document catalog has this document via stored query in db.js
-      await db.ensureMasterDocument(doc.id, doc.name);
+      // 1. Ensure master document catalog has this document via stored query in db.js (cached check)
+      if (!this.knownMasterDocIds || !this.knownMasterDocIds.has(doc.id)) {
+        await db.ensureMasterDocument(doc.id, doc.name);
+        if (this.knownMasterDocIds) this.knownMasterDocIds.add(doc.id);
+      }
 
       // 2. Direct insert into student_document table via stored query in db.js
       if (studentCode) {
@@ -985,11 +1000,6 @@ class DataStore {
     // Invalidate token so it cannot be used again
     delete this.data.resetTokens[token];
 
-    // Reload from MySQL so in-memory user objects reflect the new password
-    try {
-      await this.loadFromMysql();
-    } catch (_) {}
-
     return { success: true, email: targetEmail };
   }
 
@@ -1016,10 +1026,6 @@ class DataStore {
     }
 
     this.save();
-    try {
-      await this.loadFromMysql();
-    } catch (_) {}
-
     return { success: true, email: user.email };
   }
 

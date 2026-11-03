@@ -100,13 +100,13 @@ function getBackendUrl(path: string): string {
               </tr>
             </thead>
             <tbody>
-              @for (doc of documents(); track doc.id) {
+              @for (doc of documents(); track doc.id; let docIndex = $index) {
                 @if (doc.versions && doc.versions.length > 0) {
                   @for (ver of doc.versions; track ver.versionNumber; let isFirst = $first; let isLast = $last) {
                     <tr [class.row-highlight]="selectedDoc()?.id === doc.id" [class.sub-version-row]="!isFirst">
                       <!-- 1. No. -->
                       <td class="col-no font-mono">
-                        <span class="no-badge">#{{ doc.id }}</span>
+                        <span class="no-badge">#{{ doc.id || (docIndex + 1) }}</span>
                       </td>
 
                       <!-- 2. Document Name -->
@@ -199,7 +199,7 @@ function getBackendUrl(path: string): string {
                   <tr [class.row-highlight]="selectedDoc()?.id === doc.id">
                     <!-- 1. No. -->
                     <td class="col-no font-mono">
-                      <span class="no-badge">#{{ doc.id }}</span>
+                      <span class="no-badge">#{{ doc.id || (docIndex + 1) }}</span>
                     </td>
 
                     <!-- 2. Document Name -->

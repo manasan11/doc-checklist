@@ -47,31 +47,37 @@ async function initDatabase() {
 // ============================================================================
 
 /**
- * Find user by email, username, or Student_Id in student table.
+ * Find user by email, username, Student_Id, or Unique_Id in student table.
  */
 async function findUserByIdentifier(identifier) {
   if (!identifier) return null;
   const pool = getPool();
   if (!pool) return null;
   const clean = String(identifier).trim();
-  const cleanLower = clean.toLowerCase();
+  const numPart = clean.replace(/\D/g, '');
 
   try {
-    const [stuRows] = await pool.query(
-      'SELECT * FROM student WHERE (LOWER(TRIM(Username)) = ? OR LOWER(TRIM(Email)) = ? OR Student_Id = ?) AND (DeleteStatus = 0 OR DeleteStatus IS NULL) LIMIT 1',
-      [cleanLower, cleanLower, clean]
-    );
+    let query = 'SELECT * FROM student WHERE (Username = ? OR Email = ? OR Student_Id = ? OR Unique_Id = ?';
+    const params = [clean, clean, clean, clean];
+    if (numPart && numPart !== clean) {
+      query += ' OR Student_Id = ? OR Unique_Id = ?';
+      params.push(numPart, numPart);
+    }
+    query += ') AND (DeleteStatus = 0 OR DeleteStatus IS NULL) LIMIT 1';
+
+    const [stuRows] = await pool.query(query, params);
     if (stuRows && stuRows.length > 0) {
       const s = stuRows[0];
+      const studentCode = String(s.Student_Id || s.Unique_Id || clean).trim();
       return {
-        id: `u-${s.Student_Id}`,
+        id: `u-${studentCode}`,
         email: s.Email,
         username: s.Username || s.Email,
-        name: s.Student_Name,
+        name: s.Student_Name || s.Username || `Student ${studentCode}`,
         password: s.Password,
         role: 'user',
         department: s.Proceeding_Course_Name || 'General Operations',
-        studentCode: s.Student_Id
+        studentCode: studentCode
       };
     }
   } catch (err) {
@@ -168,11 +174,19 @@ async function ensureMasterDocument(docId, docName, docTypeId = 1) {
 async function getStudentUploadedDocuments(studentCode, legacyNumId = null) {
   const pool = getPool();
   if (!pool || !studentCode) return [];
+  const cleanCode = String(studentCode).trim();
+  const numPart = cleanCode.replace(/\D/g, '');
+
   try {
-    const [stuDocs] = await pool.query(
-      'SELECT * FROM student_document WHERE Student_Id = ? OR Student_Id = ? ORDER BY Student_Document_Id ASC',
-      [studentCode, legacyNumId ? String(legacyNumId) : studentCode]
-    );
+    const targets = new Set([cleanCode]);
+    if (legacyNumId) targets.add(String(legacyNumId).trim());
+    if (numPart) targets.add(numPart);
+
+    const targetList = Array.from(targets);
+    const placeholders = targetList.map(() => '?').join(' OR Student_Id = ');
+    const query = `SELECT * FROM student_document WHERE (Student_Id = ${placeholders}) AND (DeleteStatus = 0 OR DeleteStatus IS NULL) ORDER BY Student_Document_Id ASC`;
+
+    const [stuDocs] = await pool.query(query, targetList);
     return stuDocs || [];
   } catch (err) {
     console.warn('[DB Query] getStudentUploadedDocuments error:', err.message);

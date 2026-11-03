@@ -12,6 +12,8 @@ class DriveService {
     this.authMode = 'none'; // 'oauth2' | 'service_account' | 'none'
     this.folderId = process.env.GOOGLE_DRIVE_FOLDER_ID || '1suDPKDdeXmrBIIPG4W3FUnL4ZQbBqaNk';
     this.oauth2Client = null;
+    this.folderCache = new Map();
+    this.verifiedFoldersSet = new Set();
     this.initClient();
   }
 
@@ -102,6 +104,9 @@ class DriveService {
   }
 
   async getOrCreateStudentFolder(folderName, parentFolderId = null) {
+    if (this.folderCache.has(folderName)) {
+      return this.folderCache.get(folderName);
+    }
     const parentId = parentFolderId || this.folderId;
     const appsScriptUrl = process.env.GOOGLE_APPS_SCRIPT_URL;
 
@@ -119,7 +124,8 @@ class DriveService {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
-          redirect: 'follow'
+          redirect: 'follow',
+          signal: AbortSignal.timeout(10000)
         });
         const text = await res.text();
         let data = null;
@@ -132,11 +138,14 @@ class DriveService {
         if (data && data.success && (data.folderId || data.id)) {
           const folderId = data.folderId || data.id;
           console.log(`[Google Drive Apps Script] Student folder created/found: "${folderName}" ID=${folderId}`);
-          return {
+          const result = {
             folderId: folderId,
             folderName: data.folderName || folderName,
             folderUrl: data.folderUrl || `https://drive.google.com/drive/folders/${folderId}`
           };
+          this.folderCache.set(folderName, result);
+          this.verifiedFoldersSet.add(folderId);
+          return result;
         } else if (data && data.error) {
           console.warn('[Google Drive Apps Script] Notice:', data.error);
         }
@@ -161,18 +170,19 @@ class DriveService {
         if (listRes.data.files && listRes.data.files.length > 0) {
           const existing = listRes.data.files[0];
           console.log(`[Google Drive API] Reusing existing folder "${folderName}": ID=${existing.id}`);
-          try {
-            await this.driveClient.permissions.create({
-              fileId: existing.id,
-              supportsAllDrives: true,
-              requestBody: { role: 'writer', type: 'anyone' }
-            });
-          } catch (_) {}
-          return {
+          this.driveClient.permissions.create({
+            fileId: existing.id,
+            supportsAllDrives: true,
+            requestBody: { role: 'writer', type: 'anyone' }
+          }).catch(() => {});
+          const result = {
             folderId: existing.id,
             folderName: existing.name,
             folderUrl: existing.webViewLink || `https://drive.google.com/drive/folders/${existing.id}`
           };
+          this.folderCache.set(folderName, result);
+          this.verifiedFoldersSet.add(existing.id);
+          return result;
         }
 
         const createRes = await this.driveClient.files.create({
@@ -185,20 +195,21 @@ class DriveService {
           fields: 'id, name, webViewLink'
         });
 
-        try {
-          await this.driveClient.permissions.create({
-            fileId: createRes.data.id,
-            supportsAllDrives: true,
-            requestBody: { role: 'writer', type: 'anyone' }
-          });
-        } catch (_) {}
+        this.driveClient.permissions.create({
+          fileId: createRes.data.id,
+          supportsAllDrives: true,
+          requestBody: { role: 'writer', type: 'anyone' }
+        }).catch(() => {});
 
         console.log(`[Google Drive API] Dynamically created student folder "${folderName}": ID=${createRes.data.id}`);
-        return {
+        const result = {
           folderId: createRes.data.id,
           folderName: createRes.data.name,
           folderUrl: createRes.data.webViewLink || `https://drive.google.com/drive/folders/${createRes.data.id}`
         };
+        this.folderCache.set(folderName, result);
+        this.verifiedFoldersSet.add(createRes.data.id);
+        return result;
       } catch (apiErr) {
         console.warn('[Google Drive API] Folder creation notice:', apiErr.message);
       }
@@ -206,15 +217,18 @@ class DriveService {
 
     // 3. Fallback / Emulated storage
     const mockFolderId = `gdrive_folder_${folderName}_${Date.now()}`;
-    return {
+    const fallbackResult = {
       folderId: mockFolderId,
       folderName: folderName,
       folderUrl: `https://drive.google.com/drive/folders/${this.folderId}`
     };
+    this.folderCache.set(folderName, fallbackResult);
+    return fallbackResult;
   }
 
   async verifyFolderExists(folderId) {
     if (!folderId || folderId.startsWith('gdrive_') || folderId.startsWith('local_')) return false;
+    if (this.verifiedFoldersSet.has(folderId)) return true;
     if (this.isLiveDriveConfigured()) {
       try {
         const res = await this.driveClient.files.get({
@@ -223,6 +237,7 @@ class DriveService {
           supportsAllDrives: true
         });
         if (res.data && !res.data.trashed && res.data.mimeType === 'application/vnd.google-apps.folder') {
+          this.verifiedFoldersSet.add(folderId);
           return true;
         }
       } catch (err) {
@@ -235,6 +250,12 @@ class DriveService {
   async uploadViaAppsScript({ originalname, mimetype, buffer, size, folderId, studentFolderName, targetFileName }) {
     const appsScriptUrl = process.env.GOOGLE_APPS_SCRIPT_URL;
     if (!appsScriptUrl) return null;
+
+    // Large files (> 10 MB) stream directly through Drive API to avoid Apps Script payload/timeout constraints
+    if (buffer && buffer.length > 10 * 1024 * 1024) {
+      console.log(`[Google Drive] File "${targetFileName || originalname}" is ${(buffer.length / (1024 * 1024)).toFixed(1)}MB (> 10MB). Using direct Google Drive streaming.`);
+      return null;
+    }
 
     try {
       const base64 = buffer.toString('base64');
@@ -256,7 +277,8 @@ class DriveService {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
-        redirect: 'follow'
+        redirect: 'follow',
+        signal: AbortSignal.timeout(18000)
       });
 
       const text = await res.text();
@@ -351,19 +373,17 @@ class DriveService {
           fields: 'id, name, webViewLink, webContentLink, size, mimeType, createdTime',
         });
 
-        // Set file permissions to 'anyone with the link can view' for easier in-app preview
-        try {
-          await this.driveClient.permissions.create({
-            fileId: res.data.id,
-            supportsAllDrives: true,
-            requestBody: {
-              role: 'reader',
-              type: 'anyone',
-            },
-          });
-        } catch (permErr) {
+        // Set file permissions asynchronously without blocking the response
+        this.driveClient.permissions.create({
+          fileId: res.data.id,
+          supportsAllDrives: true,
+          requestBody: {
+            role: 'reader',
+            type: 'anyone',
+          },
+        }).catch(permErr => {
           console.warn('[Google Drive] Permission setting notice:', permErr.message);
-        }
+        });
 
         console.log(`[Google Drive] File uploaded successfully to Google Drive folder ${targetFolderId}: ID=${res.data.id}`);
 
