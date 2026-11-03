@@ -130,17 +130,17 @@ import { NotificationService } from '../../services/notification.service';
         @if (currentView() === 'forgot') {
           <form (ngSubmit)="onForgotPassword()" class="login-form">
             <div class="form-group">
-              <label class="form-label" for="forgotEmail">Registered Email or Username</label>
+              <label class="form-label" for="forgotEmail">Your Email Address</label>
               <input 
-                type="text" 
+                type="email" 
                 id="forgotEmail" 
                 name="forgotEmail" 
                 [(ngModel)]="forgotEmail" 
                 (ngModelChange)="errorMessage.set(''); resetSentMessage.set('')"
                 required 
                 class="form-control" 
-                placeholder="Enter your registered email or username"
-                autocomplete="username"
+                placeholder="e.g. manasansreedharan123@gmail.com"
+                autocomplete="off"
               >
             </div>
 
@@ -928,7 +928,10 @@ export class LoginComponent implements OnInit, AfterViewInit {
       next: (res) => {
         this.loading.set(false);
         const emailSent = res.email || this.forgotEmail.trim();
-        this.resetSentMessage.set(`A password reset link has been dispatched to ${emailSent}. Please check your email inbox and click the link to reset your password.`);
+        this.generatedResetLink.set(res.resetLink || '');
+        this.generatedToken.set(res.resetToken || '');
+        this.targetEmail.set(emailSent);
+        this.resetSentMessage.set(`A password reset link has been dispatched to ${emailSent}. Check your email or click the button below to reset immediately.`);
         this.notificationService.success('Email Sent', 'Reset link sent to your registered email.');
       },
       error: (err) => {
@@ -938,6 +941,15 @@ export class LoginComponent implements OnInit, AfterViewInit {
         this.notificationService.error('Not Found', msg);
       }
     });
+  }
+
+  openDirectReset() {
+    const token = this.generatedToken();
+    if (token) {
+      this.resetTokenInput = token;
+      this.setView('reset');
+      this.verifyResetToken(token);
+    }
   }
 
   onResetPassword() {

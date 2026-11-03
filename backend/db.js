@@ -54,16 +54,24 @@ async function findUserByIdentifier(identifier) {
   const pool = getPool();
   if (!pool) return null;
   const clean = String(identifier).trim();
-  const numPart = clean.replace(/\D/g, '');
+  const isEmail = clean.includes('@');
+  const numPart = isEmail ? '' : clean.replace(/\D/g, '');
 
   try {
-    let query = 'SELECT * FROM student WHERE (Username = ? OR Email = ? OR Student_Id = ? OR Unique_Id = ?';
-    const params = [clean, clean, clean, clean];
-    if (numPart && numPart !== clean) {
-      query += ' OR Student_Id = ? OR Unique_Id = ?';
-      params.push(numPart, numPart);
+    let query = '';
+    let params = [];
+    if (isEmail) {
+      query = 'SELECT * FROM student WHERE LOWER(TRIM(Email)) = LOWER(TRIM(?)) AND (DeleteStatus = 0 OR DeleteStatus IS NULL) LIMIT 1';
+      params = [clean];
+    } else {
+      query = 'SELECT * FROM student WHERE (Username = ? OR Student_Id = ? OR Unique_Id = ?';
+      params = [clean, clean, clean];
+      if (numPart && numPart !== clean) {
+        query += ' OR Student_Id = ? OR Unique_Id = ?';
+        params.push(numPart, numPart);
+      }
+      query += ') AND (DeleteStatus = 0 OR DeleteStatus IS NULL) LIMIT 1';
     }
-    query += ') AND (DeleteStatus = 0 OR DeleteStatus IS NULL) LIMIT 1';
 
     const [stuRows] = await pool.query(query, params);
     if (stuRows && stuRows.length > 0) {

@@ -49,7 +49,7 @@ function authenticateToken(req, res, next) {
           user = dataStore.findUserByEmailOrUsername(decoded.email);
         }
         if (user) {
-          req.user = { id: user.id, email: user.email, name: user.name, role: user.role };
+          req.user = { id: user.id, email: targetEmail, name: user.name, role: user.role };
           return next();
         }
         // Fallback if user ID changed but email matches
@@ -156,10 +156,21 @@ app.post('/api/auth/forgot-password', async (req, res) => {
       return res.status(404).json({ error: 'No account registered with this email or username in the database' });
     }
 
-    // Generate token strictly for THAT user's registered email
-    const resetToken = dataStore.createResetToken(user.email, user);
+    let targetEmail = trimmedInput.includes('@') ? trimmedInput : null;
+    if (user && user.email && user.email.trim() && !user.email.endsWith('@example.com')) {
+      targetEmail = user.email.trim();
+    } else if (user && user.role === 'admin') {
+      targetEmail = process.env.SMTP_USER || 'Docs@ysquareoverseas.com';
+    }
 
-    // Resolve client origin
+    if (!targetEmail) {
+      return res.status(400).json({
+        error: `The account "${user.name || user.username || trimmedInput}" does not have an email address in the database. Please enter your email address.`
+      });
+    }
+
+    const resetToken = dataStore.createResetToken(targetEmail, user);
+
     const origin = req.headers.origin || req.headers.referer;
     let clientOrigin = 'http://localhost:4200';
     if (origin) {
@@ -171,14 +182,13 @@ app.post('/api/auth/forgot-password', async (req, res) => {
       }
     }
 
-    // Direct password reset URL to open password reset view with token
-    const resetLink = `${clientOrigin}/login?view=reset&token=${encodeURIComponent(resetToken)}&email=${encodeURIComponent(user.email)}`;
+    const resetLink = `${clientOrigin}/login?view=reset&token=${encodeURIComponent(resetToken)}&email=${encodeURIComponent(targetEmail)}`;
 
     let mailResult = { liveEmailSent: false };
     try {
       mailResult = await mailService.sendPasswordResetEmail({
-        to: user.email,
-        name: user.name,
+        to: targetEmail,
+        name: user.name || 'Student',
         resetLink,
         token: resetToken
       });

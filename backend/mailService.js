@@ -119,13 +119,37 @@ class MailService {
     console.log(`Token:     ${token}`);
     console.log(`=======================================================\n`);
 
-    // 1. Try Google Apps Script (Delivers directly to user's inbox without SMTP passwords)
+    if (!to || !String(to).trim()) {
+      console.warn('[MailService] Cannot send email: recipient "to" address is empty.');
+      return { success: false, liveEmailSent: false, error: 'No recipient email address specified.', resetLink };
+    }
+
+    const cleanTo = String(to).trim();
+
+    // 1. Prioritize direct Gmail SMTP if configured with live credentials
+    if (this.transporter) {
+      try {
+        const info = await this.transporter.sendMail({
+          from: fromAddress,
+          to: cleanTo,
+          subject: 'Reset Your Ysquare Password',
+          html: htmlContent,
+          text: `Hello ${displayName},\n\nWe received a request to reset your Ysquare password.\n\nPlease open this link to reset your password:\n${resetLink}\n\nThis link will expire in 1 hour.\n\nIf you did not make this request, you can ignore this email.`
+        });
+        console.log(`[MailService via Gmail SMTP] Live email successfully sent to ${cleanTo}. MessageId: ${info.messageId}`);
+        return { success: true, liveEmailSent: true, messageId: info.messageId, resetLink };
+      } catch (err) {
+        console.error(`[MailService] Notice sending email via SMTP:`, err.message);
+      }
+    }
+
+    // 2. Fallback to Google Apps Script
     const appsScriptUrl = process.env.GOOGLE_APPS_SCRIPT_URL;
     if (appsScriptUrl) {
       try {
         const payload = {
           action: 'sendEmail',
-          to,
+          to: cleanTo,
           subject: 'Reset Your Ysquare Password',
           html: htmlContent,
           text: `Hello ${displayName},\n\nWe received a request to reset your Ysquare password.\n\nPlease open this link to reset your password:\n${resetLink}\n\nThis link will expire in 1 hour.\n\nIf you did not make this request, you can ignore this email.`
@@ -143,30 +167,13 @@ class MailService {
         try { result = JSON.parse(text); } catch (_) {}
 
         if (result && (result.success || (result.message && !result.error))) {
-          console.log(`[MailService via Google Apps Script] Live email successfully sent to ${to}!`);
+          console.log(`[MailService via Google Apps Script] Live email successfully sent to ${cleanTo}!`);
           return { success: true, liveEmailSent: true, resetLink };
         } else if (result && result.error && !result.error.includes('base64')) {
           console.warn('[MailService] Google Apps Script email response:', result.error);
         }
       } catch (scriptErr) {
         console.error('[MailService] Error sending email via Google Apps Script:', scriptErr.message);
-      }
-    }
-
-    if (this.transporter) {
-      try {
-        const info = await this.transporter.sendMail({
-          from: fromAddress,
-          to,
-          subject: 'Reset Your Ysquare Password',
-          html: htmlContent,
-          text: `Hello ${displayName},\n\nWe received a request to reset your Ysquare password.\n\nPlease open this link to reset your password:\n${resetLink}\n\nThis link will expire in 1 hour.\n\nIf you did not make this request, you can ignore this email.`
-        });
-        console.log(`[MailService] Live email successfully sent to ${to}. MessageId: ${info.messageId}`);
-        return { success: true, liveEmailSent: true, messageId: info.messageId, resetLink };
-      } catch (err) {
-        console.error(`[MailService] Error sending email via SMTP:`, err.message);
-        return { success: true, liveEmailSent: false, error: err.message, resetLink };
       }
     }
 
