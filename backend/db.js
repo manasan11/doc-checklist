@@ -239,7 +239,7 @@ async function insertStudentDocument(studentCode, fileName, docId, docName, driv
     const [res] = await pool.query(`
       INSERT INTO student_document (
         Student_Id, Entry_date, File_Name, Document_Id, Document_Name, Image, Description, DeleteStatus, Assigned_Staff, Verification_Status
-      ) VALUES (?, CURDATE(), ?, ?, ?, ?, ?, 0, ?, ?)
+      ) VALUES (?, NOW(), ?, ?, ?, ?, ?, 0, ?, ?)
     `, [
       cleanStudent,
       fileName,

@@ -27,6 +27,27 @@ function toGoogleDriveViewUrl(urlOrPath, fallbackFileId = null) {
   return val;
 }
 
+function formatUploadDateTime(val) {
+  if (!val) return null;
+  if (typeof val === 'string' && /^\d{1,2}\/\d{1,2}\/\d{4},\s*\d{1,2}:\d{2}\s*(?:AM|PM)$/i.test(val.trim())) {
+    return val.trim();
+  }
+  const d = new Date(val);
+  if (isNaN(d.getTime())) return String(val);
+
+  const day = d.getDate();
+  const month = d.getMonth() + 1;
+  const year = d.getFullYear();
+  let hours = d.getHours();
+  const minutes = String(d.getMinutes()).padStart(2, '0');
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12;
+  hours = hours ? hours : 12;
+  const strTime = `${String(hours).padStart(2, '0')}:${minutes} ${ampm}`;
+
+  return `${day}/${month}/${year}, ${strTime}`;
+}
+
 function createDefaultDocuments() {
   return INITIAL_DOCUMENTS.map(doc => ({
     id: doc.id,
@@ -268,7 +289,7 @@ class DataStore {
         downloadUrl: verDriveUrl,
         driveFileId: verIdMatch ? verIdMatch[1] : null,
         notes: r.Description || '',
-        uploadDateTime: r.Entry_date ? new Date(r.Entry_date).toLocaleDateString() : null,
+        uploadDateTime: r.Entry_date ? formatUploadDateTime(r.Entry_date) : null,
         verificationStatus: verVStatus,
         approvalStatus: verAStatus,
         rejectionReason: r.rejection_reason || ''
@@ -633,11 +654,7 @@ class DataStore {
     }
 
     const now = new Date();
-    const day = String(now.getDate()).padStart(2, '0');
-    const month = now.toLocaleString('en-US', { month: 'short' });
-    const year = now.getFullYear();
-    const time = now.toLocaleString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
-    const formattedDate = `${day} ${month} ${year}, ${time}`;
+    const formattedDate = formatUploadDateTime(now);
     const nowISO = now.toISOString();
 
     let targetDocId = docId;
