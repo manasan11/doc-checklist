@@ -36,7 +36,6 @@ app.get('/api', (req, res) => {
       auth: [
         'POST /api/auth/login',
         'POST /api/auth/forgot-password',
-        'GET /api/auth/verify-reset-token',
         'POST /api/auth/reset-password',
         'POST /api/auth/change-password'
       ],

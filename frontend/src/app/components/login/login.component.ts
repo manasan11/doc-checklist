@@ -175,24 +175,7 @@ import { NotificationService } from '../../services/notification.service';
 
         <!-- 3. PASSWORD RESET VIEW (Opened after clicking email link) -->
         @if (currentView() === 'reset') {
-          @if (tokenError()) {
-            <div class="error-alert token-error-banner">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
-              <div>
-                <strong style="display: block; margin-bottom: 2px;">Reset Link Invalid or Expired</strong>
-                <span>{{ tokenError() }}</span>
-              </div>
-            </div>
-            <div class="form-actions" style="margin-top: 18px;">
-              <button type="button" class="btn-submit" (click)="resetForgotState(); setView('forgot')">
-                Request a New Reset Link
-              </button>
-              <button type="button" class="btn-back" (click)="setView('login')">
-                &larr; Back to Login
-              </button>
-            </div>
-          } @else {
-            <form (ngSubmit)="onResetPassword()" class="login-form">
+          <form (ngSubmit)="onResetPassword()" class="login-form">
               @if (targetEmail()) {
                 <div class="verified-account-banner">
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
@@ -316,7 +299,6 @@ import { NotificationService } from '../../services/notification.service';
                 </button>
               </div>
             </form>
-          }
         }
       </div>
     </div>
@@ -776,7 +758,6 @@ export class LoginComponent implements OnInit, AfterViewInit {
   resetTokenInput = '';
   isTokenFromUrl = signal<boolean>(false);
   targetEmail = signal<string>('');
-  tokenError = signal<string>('');
   newPassword = '';
   confirmPassword = '';
   showNewPassword = signal<boolean>(false);
@@ -796,7 +777,6 @@ export class LoginComponent implements OnInit, AfterViewInit {
         if (email) {
           this.targetEmail.set(email);
         }
-        this.verifyResetToken(token);
       } else if (params['view'] === 'forgot') {
         this.currentView.set('forgot');
       }
@@ -850,25 +830,6 @@ export class LoginComponent implements OnInit, AfterViewInit {
     this.errorMessage.set('');
   }
 
-  verifyResetToken(token: string) {
-    this.tokenError.set('');
-    this.authService.verifyResetToken(token).subscribe({
-      next: (res) => {
-        if (res.valid) {
-          if (res.email) {
-            this.targetEmail.set(res.email);
-          }
-        } else {
-          this.tokenError.set(res.error || 'Reset link has expired or is invalid.');
-        }
-      },
-      error: (err) => {
-        const msg = err.error?.error || 'This reset link has expired or is invalid. Please request a new one.';
-        this.tokenError.set(msg);
-      }
-    });
-  }
-
   navigateViaResetLink(event: MouseEvent) {
     event.preventDefault();
     if (this.generatedToken()) {
@@ -878,7 +839,6 @@ export class LoginComponent implements OnInit, AfterViewInit {
         this.targetEmail.set(this.forgotSuccessEmail());
       }
       this.setView('reset');
-      this.verifyResetToken(this.resetTokenInput);
     }
   }
 
@@ -948,7 +908,6 @@ export class LoginComponent implements OnInit, AfterViewInit {
     if (token) {
       this.resetTokenInput = token;
       this.setView('reset');
-      this.verifyResetToken(token);
     }
   }
 

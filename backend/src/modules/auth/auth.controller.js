@@ -49,20 +49,6 @@ async function forgotPassword(req, res) {
   }
 }
 
-function verifyToken(req, res) {
-  const { token } = req.query;
-  if (!token) {
-    return res.status(400).json({ valid: false, error: 'Reset token is required' });
-  }
-
-  const result = authService.verifyResetToken(token);
-  if (!result.valid) {
-    return res.status(400).json(result);
-  }
-
-  return res.json(result);
-}
-
 async function resetPassword(req, res) {
   const { token, newPassword } = req.body;
   if (!token || !newPassword) {
@@ -111,7 +97,6 @@ async function changePassword(req, res) {
 module.exports = {
   login,
   forgotPassword,
-  verifyToken,
   resetPassword,
   changePassword
 };

@@ -92,20 +92,6 @@ async function requestPasswordReset(emailInput, originHeader) {
   };
 }
 
-function verifyResetToken(token) {
-  const tokenInfo = dataStore.getResetToken(token);
-  if (!tokenInfo || tokenInfo.expiresAt < Date.now()) {
-    return { valid: false, error: 'This password reset link has expired or is invalid. Please request a new one.' };
-  }
-
-  const user = dataStore.findUserByEmailOrUsername(tokenInfo.email);
-  return {
-    valid: true,
-    email: tokenInfo.email,
-    name: user ? user.name : tokenInfo.email
-  };
-}
-
 async function resetPassword(token, newPassword) {
   const result = await dataStore.verifyAndResetPassword(token, newPassword);
   if (!result.success) {
@@ -151,7 +137,6 @@ module.exports = {
   authenticate,
   generateToken,
   requestPasswordReset,
-  verifyResetToken,
   resetPassword,
   changePassword
 };

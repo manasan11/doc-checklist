@@ -35,10 +35,3 @@ export interface ForgotPasswordResponse {
   liveEmailSent?: boolean;
   instructions?: string;
 }
-
-export interface VerifyTokenResponse {
-  valid: boolean;
-  email?: string;
-  name?: string;
-  error?: string;
-}

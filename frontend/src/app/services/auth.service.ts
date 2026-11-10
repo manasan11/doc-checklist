@@ -97,13 +97,6 @@ export class AuthService {
     return this.http.post<ForgotPasswordResponse>(`${API_URL}/auth/forgot-password`, { email });
   }
 
-  verifyResetToken(token: string): Observable<{ valid: boolean; email?: string; name?: string; error?: string }> {
-    return this.http.get<{ valid: boolean; email?: string; name?: string; error?: string }>(
-      `${API_URL}/auth/verify-reset-token`,
-      { params: { token } }
-    );
-  }
-
   resetPassword(token: string, newPassword: string): Observable<{ message: string; email?: string }> {
     return this.http.post<{ message: string; email?: string }>(`${API_URL}/auth/reset-password`, { token, newPassword });
   }

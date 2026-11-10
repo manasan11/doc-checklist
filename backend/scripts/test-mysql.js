@@ -29,3 +29,4 @@ checkDatabase().catch(err => {
   console.error('MySQL Check failed:', err);
   process.exit(1);
 });
+

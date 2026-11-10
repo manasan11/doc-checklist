@@ -974,12 +974,6 @@ class DataStore {
     return token;
   }
 
-  getResetToken(token) {
-    this.data = this.load();
-    if (!this.data.resetTokens) return null;
-    return this.data.resetTokens[token] || null;
-  }
-
   async verifyAndResetPassword(token, newPassword) {
     this.data = this.load();
     if (!this.data.resetTokens) {
