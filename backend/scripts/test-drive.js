@@ -1,4 +1,4 @@
-const driveService = require('../src/services/drive/drive.service');
+const driveService = require('../src/services/drive.service');
 
 async function test() {
   console.log('[1] Checking Google Drive Status...');
@@ -53,3 +53,4 @@ test().catch(err => {
   console.error('Test failed:', err);
   process.exit(1);
 });
+

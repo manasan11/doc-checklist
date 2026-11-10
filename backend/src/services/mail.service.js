@@ -1,5 +1,5 @@
 const nodemailer = require('nodemailer');
-const config = require('../../config');
+const config = require('../config');
 
 function getPasswordResetHtml({ displayName, resetLink, to, year = new Date().getFullYear() }) {
   return `

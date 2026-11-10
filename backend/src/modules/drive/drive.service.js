@@ -1,10 +1,10 @@
 const path = require('path');
 const fs = require('fs');
-const driveService = require('../../services/drive/drive.service');
+const driveService = require('../../services/drive.service');
 const dataStore = require('../../dataStore');
 const driveConfig = require('../../config/drive.config');
 const { ensureUserDriveFolder } = require('../documents/document.service');
-const { convertDocxBufferToHtml, convertDocxFileToHtml, renderDocumentPage } = require('../../services/viewer/docx.service');
+const { convertDocxBufferToHtml, convertDocxFileToHtml, renderDocumentPage } = require('../../services/docx.service');
 
 function getStatus() {
   return driveService.getDriveStatus();

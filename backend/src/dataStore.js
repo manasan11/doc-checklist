@@ -872,7 +872,7 @@ class DataStore {
       );
       if (!isReferencedByOther) {
         try {
-          const driveService = require('./services/drive/drive.service');
+          const driveService = require('./services/drive.service');
           driveService.deleteFile(fileIdToDelete).catch(() => {});
         } catch (_) {}
       }

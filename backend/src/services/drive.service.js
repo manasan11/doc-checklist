@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { Readable } = require('stream');
 const { google } = require('googleapis');
-const driveConfig = require('../../config/drive.config');
+const driveConfig = require('../config/drive.config');
 
 // 1. Apps Script Client
 class AppsScriptClient {

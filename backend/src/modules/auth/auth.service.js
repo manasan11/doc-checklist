@@ -2,7 +2,7 @@ const jwt = require('jsonwebtoken');
 const config = require('../../config');
 const dataStore = require('../../dataStore');
 const db = require('../../config/database');
-const mailService = require('../../services/mail/mail.service');
+const mailService = require('../../services/mail.service');
 
 async function authenticate(username, password) {
   const result = await dataStore.authenticateUser(username, password);

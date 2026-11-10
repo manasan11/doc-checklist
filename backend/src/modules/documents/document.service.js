@@ -1,6 +1,6 @@
 const path = require('path');
 const dataStore = require('../../dataStore');
-const driveService = require('../../services/drive/drive.service');
+const driveService = require('../../services/drive.service');
 const db = require('../../config/database');
 
 function generateFilenameFromDocType(documentType, originalname) {
