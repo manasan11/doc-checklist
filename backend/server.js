@@ -1,7 +1,10 @@
-const config = require('./config');
-const app = require('./app');
-const { initDatabase, isDbConnected } = require('./config/database');
-const dataStore = require('./dataStore');
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '.env'), override: true });
+
+const config = require('./src/config');
+const app = require('./src/app');
+const { initDatabase } = require('./src/config/database');
+const dataStore = require('./src/dataStore');
 const { execSync } = require('child_process');
 
 process.on('uncaughtException', (err) => {
@@ -16,7 +19,7 @@ function listenOnPort(port, retries = 3) {
   const server = app.listen(port, () => {
     console.log(`=======================================================`);
     console.log(`Document Checklist API running on http://localhost:${port}`);
-    console.log(`Architecture: Hybrid Modular Architecture (Clean & Scalable)`);
+    console.log(`Architecture: Hybrid Modular Architecture (src/ based)`);
     console.log(`Mode: Google Drive Integration Enabled`);
     console.log(`Database: MySQL (${config.db.database}) Connected - Dynamic Users Enabled`);
     console.log(`=======================================================`);

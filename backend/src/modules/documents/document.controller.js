@@ -1,5 +1,4 @@
 const documentService = require('./document.service');
-const dataStore = require('../../dataStore');
 
 async function getDocuments(req, res) {
   const studentIdParam = req.query.studentId || req.query.Student_Id;

@@ -7,7 +7,7 @@ const documentRoutes = require('./modules/documents/document.routes');
 const driveRoutes = require('./modules/drive/drive.routes');
 const documentController = require('./modules/documents/document.controller');
 const { authenticateToken } = require('./middlewares/auth.middleware');
-const { errorHandler } = require('./middlewares/error.middleware');
+const { errorHandler, notFoundHandler } = require('./middlewares/error.middleware');
 
 const app = express();
 
@@ -25,12 +25,12 @@ app.use('/api/drive', driveRoutes);
 app.get('/api/students/:studentId/documents', authenticateToken, documentController.getStudentFollowupDocuments);
 app.get('/api/students/:studentId/followup-documents', authenticateToken, documentController.getStudentFollowupDocuments);
 
-// Health & API info endpoint
+// Root health & API info endpoint
 app.get('/api', (req, res) => {
   res.json({
     name: 'Document Checklist API',
     version: '2.0.0',
-    architecture: 'Hybrid Modular Architecture',
+    architecture: 'Hybrid Modular Architecture with src/',
     status: 'online',
     endpoints: {
       auth: ['POST /api/auth/login', 'POST /api/auth/forgot-password', 'POST /api/auth/reset-password', 'GET /api/auth/me'],

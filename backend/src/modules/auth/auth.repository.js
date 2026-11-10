@@ -36,7 +36,7 @@ async function findUserByIdentifier(identifier) {
         password: s.Password,
         role: 'user',
         department: s.Proceeding_Course_Name || 'General Operations',
-        studentCode: studentCode
+        studentCode
       };
     }
   } catch (err) {

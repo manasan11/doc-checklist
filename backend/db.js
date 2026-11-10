@@ -1,7 +1,7 @@
-const { getPool, initDatabase, isDbConnected } = require('./config/database');
-const authRepo = require('./modules/auth/auth.repository');
-const studentRepo = require('./modules/students/student.repository');
-const docRepo = require('./modules/documents/document.repository');
+const { getPool, initDatabase, isDbConnected } = require('./src/config/database');
+const authRepo = require('./src/modules/auth/auth.repository');
+const studentRepo = require('./src/modules/students/student.repository');
+const docRepo = require('./src/modules/documents/document.repository');
 
 async function updateUserDriveFolder(userId, folderId, folderName) {
   return true;

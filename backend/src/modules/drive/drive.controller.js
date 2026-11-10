@@ -1,22 +1,21 @@
 const path = require('path');
 const fs = require('fs');
+const driveModuleService = require('./drive.service');
 const driveService = require('../../services/drive/drive.service');
 const dataStore = require('../../dataStore');
+const driveConfig = require('../../config/drive.config');
 const { renderDocumentPage } = require('../../services/viewer/viewer.template');
 const { convertDocxBufferToHtml, convertDocxFileToHtml } = require('../../services/viewer/docx.service');
 const { getMimeTypeByExtension } = require('../../common/utils/file.util');
-const { ensureUserDriveFolder } = require('../documents/document.service');
-
-const uploadsDir = path.resolve(__dirname, '../../uploads');
 
 function getStatus(req, res) {
-  return res.json(driveService.getDriveStatus());
+  return res.json(driveModuleService.getStatus());
 }
 
 async function listFiles(req, res) {
   try {
     const folderId = req.query.folderId;
-    const result = await driveService.listFiles(folderId);
+    const result = await driveModuleService.listFiles(folderId);
     return res.json(result);
   } catch (err) {
     console.error('[DriveController] listFiles error:', err);
@@ -30,8 +29,7 @@ async function syncFiles(req, res) {
       ? req.body.userId 
       : req.user.id;
 
-    const driveList = await driveService.listFiles();
-    const syncResult = dataStore.syncGoogleDriveFiles(targetUserId, driveList.files || []);
+    const { syncResult, driveList } = await driveModuleService.syncFiles(targetUserId);
 
     return res.json({
       message: `Google Drive sync complete. ${syncResult.syncedCount} new document(s) imported into checklist.`,
@@ -48,29 +46,7 @@ async function syncFiles(req, res) {
 
 async function syncFolders(req, res) {
   try {
-    const users = dataStore.data.users || [];
-    let count = 0;
-    for (const u of users) {
-      if (u.role === 'admin') continue;
-      try {
-        await ensureUserDriveFolder(u);
-        count++;
-      } catch (e) {
-        console.warn(`[Google Drive] Could not verify folder for ${u.name}:`, e.message);
-      }
-    }
-
-    const students = (dataStore.data.users || [])
-      .filter(u => u.role !== 'admin')
-      .map(u => ({
-        id: u.id,
-        name: u.name,
-        email: u.email,
-        studentCode: u.studentCode,
-        driveFolderId: u.driveFolderId,
-        driveFolderName: u.driveFolderName,
-        folderUrl: u.driveFolderId ? `https://drive.google.com/drive/folders/${u.driveFolderId}` : null
-      }));
+    const { count, students } = await driveModuleService.syncAllStudentFolders();
 
     return res.json({
       message: `Verified and synchronized Google Drive folders for ${students.length} student(s).`,
@@ -149,8 +125,8 @@ async function viewFile(req, res) {
     if (foundSavedFileName) break;
   }
 
-  if (!foundSavedFileName && fs.existsSync(uploadsDir)) {
-    const files = fs.readdirSync(uploadsDir);
+  if (!foundSavedFileName && fs.existsSync(driveConfig.uploadsDir)) {
+    const files = fs.readdirSync(driveConfig.uploadsDir);
     const match = files.find(f => f.includes(fileId));
     if (match) foundSavedFileName = match;
   }
@@ -159,7 +135,7 @@ async function viewFile(req, res) {
     return res.status(404).send('Document file not found in storage.');
   }
 
-  const filePath = path.join(uploadsDir, foundSavedFileName);
+  const filePath = path.join(driveConfig.uploadsDir, foundSavedFileName);
   if (!fs.existsSync(filePath)) {
     return res.status(404).send('File missing from disk.');
   }
@@ -223,8 +199,8 @@ async function downloadFile(req, res) {
     if (foundSavedFileName) break;
   }
 
-  if (!foundSavedFileName && fs.existsSync(uploadsDir)) {
-    const files = fs.readdirSync(uploadsDir);
+  if (!foundSavedFileName && fs.existsSync(driveConfig.uploadsDir)) {
+    const files = fs.readdirSync(driveConfig.uploadsDir);
     const match = files.find(f => f.includes(fileId));
     if (match) foundSavedFileName = match;
   }
@@ -233,7 +209,7 @@ async function downloadFile(req, res) {
     return res.status(404).send('File not found');
   }
 
-  const filePath = path.join(uploadsDir, foundSavedFileName);
+  const filePath = path.join(driveConfig.uploadsDir, foundSavedFileName);
   res.download(filePath, originalName);
 }
 

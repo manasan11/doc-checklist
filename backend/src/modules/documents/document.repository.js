@@ -151,7 +151,7 @@ async function updateStudentDocumentVerificationStatus(studentIdOrDocId, docIdOr
   const pool = getPool();
   if (!pool) return false;
 
-  // Support direct signature: updateStudentDocumentVerificationStatus(studentDocumentId, verificationStatus, rejectionReason)
+  // Direct Student_Document_Id update
   if (typeof studentIdOrDocId === 'number' && typeof docIdOrStatus === 'number' && (studentDocumentId === null || studentDocumentId === undefined)) {
     const sDocId = studentIdOrDocId;
     const vStatus = Number(docIdOrStatus) || 0;
@@ -168,7 +168,6 @@ async function updateStudentDocumentVerificationStatus(studentIdOrDocId, docIdOr
     }
   }
 
-  // Support full signature: (studentId, docId, status, rejectionReason, studentDocumentId)
   const studentId = studentIdOrDocId;
   const docId = docIdOrStatus;
   const status = statusOrReason;

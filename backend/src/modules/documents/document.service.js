@@ -196,7 +196,7 @@ async function processDocumentUpload({ rawDocId, targetUserId, userNotes, reques
     buffer: file.buffer,
     size: file.size,
     folderId: studentFolderId,
-    studentFolderName: studentFolderName
+    studentFolderName
   });
 
   driveResult.fileName = finalFileName;

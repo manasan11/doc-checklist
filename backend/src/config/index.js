@@ -1,5 +1,5 @@
 const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '..', '.env'), override: true });
+require('dotenv').config({ path: path.resolve(__dirname, '../../.env'), override: true });
 
 const config = {
   env: process.env.NODE_ENV || 'development',
@@ -20,14 +20,14 @@ const config = {
   },
 
   drive: {
-    folderId: process.env.GOOGLE_DRIVE_FOLDER_ID || '',
+    folderId: process.env.GOOGLE_DRIVE_FOLDER_ID || '1suDPKDdeXmrBIIPG4W3FUnL4ZQbBqaNk',
     serviceAccountKeyFile: process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE || 'service-account.json',
     clientEmail: process.env.GOOGLE_CLIENT_EMAIL || '',
     privateKey: (process.env.GOOGLE_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
     clientId: process.env.GOOGLE_CLIENT_ID || '',
     clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
     refreshToken: process.env.GOOGLE_REFRESH_TOKEN || '',
-    redirectUri: process.env.GOOGLE_REDIRECT_URI || 'http://localhost:5000/oauth2callback',
+    redirectUri: process.env.GOOGLE_REDIRECT_URI || 'http://localhost:5000/api/drive/oauth2callback',
     appsScriptUrl: process.env.GOOGLE_APPS_SCRIPT_URL || ''
   },
 

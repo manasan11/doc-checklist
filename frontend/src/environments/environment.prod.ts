@@ -3,9 +3,8 @@ export const environment = {
   // backendUrl: 'http://localhost:5000',
   // apiUrl: 'http://localhost:5000/api'
 
+ backendUrl: 'https://ysqurestudentapi.trackbox.live',
+  apiUrl: 'https://ysqurestudentapi.trackbox.live/api'
 
-  
-  backendUrl: 'http://ysqurestudentapi.trackbox.live',
-  apiUrl: 'http://ysqurestudentapi.trackbox.live/api'
 };
 
