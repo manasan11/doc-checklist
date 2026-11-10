@@ -1,7 +1,7 @@
 const jwt = require('jsonwebtoken');
 const config = require('../../config');
 const dataStore = require('../../dataStore');
-const authRepo = require('./auth.repository');
+const db = require('../../config/database');
 const mailService = require('../../services/mail/mail.service');
 
 async function authenticate(username, password) {
@@ -26,7 +26,7 @@ async function requestPasswordReset(emailInput, originHeader) {
 
   let user = null;
   try {
-    user = await authRepo.findUserByIdentifier(cleanLower);
+    user = await db.findUserByIdentifier(cleanLower);
   } catch (err) {
     console.warn('[AuthService] findUserByIdentifier warning:', err.message);
   }
@@ -114,7 +114,7 @@ async function resetPassword(token, newPassword) {
 
   try {
     if (result.email) {
-      await authRepo.updateUserPassword(result.studentCode || null, result.email, result.username || null, newPassword);
+      await db.updateUserPassword(result.studentCode || null, result.email, result.username || null, newPassword);
     }
   } catch (err) {
     console.warn('[AuthService] MySQL notice updating password:', err.message);
@@ -139,7 +139,7 @@ async function changePassword(userId, userEmail, newPassword) {
     const cleanEmail = (userEmail || user?.email || '').toLowerCase().trim();
     const cleanUsername = (user?.username || '').toLowerCase().trim();
 
-    await authRepo.updateUserPassword(studentCode, cleanEmail, cleanUsername, newPassword);
+    await db.updateUserPassword(studentCode, cleanEmail, cleanUsername, newPassword);
   } catch (err) {
     console.warn('[AuthService] MySQL notice updating password:', err.message);
   }
