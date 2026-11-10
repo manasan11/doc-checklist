@@ -27,12 +27,16 @@ function getBackendUrl(path: string): string {
   ],
   template: `
     <main class="dashboard-container">
-      <!-- Top Bar: Welcome User & Logout -->
+      <!-- Top Bar: Logo, Welcome User & Logout -->
       <header class="top-header">
-        <div class="user-greeting-wrapper">
-          <h1 class="welcome-title">
-            Welcome, <span class="user-highlight">{{ authService.currentUser()?.name }}</span>
-          </h1>
+        <div class="header-brand-greeting">
+          <img src="logo.jpg" alt="Ysquare" class="dashboard-logo" />
+          <div class="header-divider"></div>
+          <div class="user-greeting-wrapper">
+            <h1 class="welcome-title">
+              Welcome, <span class="user-highlight">{{ authService.currentUser()?.name }}</span>
+            </h1>
+          </div>
         </div>
         <div class="header-actions">
           <button class="btn-reset-password" (click)="openResetPasswordModal()" title="Reset account password">
@@ -478,6 +482,27 @@ function getBackendUrl(path: string): string {
       border: 1px solid #EAE3D8;
       border-radius: var(--radius-lg);
       box-shadow: 0 4px 16px -2px rgba(40, 20, 10, 0.05);
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .header-brand-greeting {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      flex-wrap: wrap;
+    }
+
+    .dashboard-logo {
+      height: 38px;
+      width: auto;
+      object-fit: contain;
+    }
+
+    .header-divider {
+      width: 1px;
+      height: 30px;
+      background: #EAE3D8;
     }
 
     .user-greeting-wrapper {
