@@ -2,7 +2,7 @@ const dataStore = require('../../dataStore');
 const driveService = require('../../services/drive/drive.service');
 const studentRepo = require('../students/student.repository');
 const { generateFilenameFromDocType } = require('../../common/utils/file.util');
-const docRepo = require('./document.repository');
+const db = require('../../config/database');
 
 async function ensureUserDriveFolder(user) {
   if (!user || user.role === 'admin') {
@@ -112,9 +112,9 @@ async function getFollowupDocuments(studentId, deptId) {
   const associatedUserId = followupRecord ? followupRecord.User_Id : null;
   const associatedUserName = followupRecord ? followupRecord.UserName : null;
 
-  if (associatedUserId && docRepo.updateStudentDocumentStaff) {
+  if (associatedUserId && db.updateStudentDocumentStaff) {
     try {
-      await docRepo.updateStudentDocumentStaff(cleanStudentCode, associatedUserId);
+      await db.updateStudentDocumentStaff(cleanStudentCode, associatedUserId);
     } catch (_) {}
   }
 
