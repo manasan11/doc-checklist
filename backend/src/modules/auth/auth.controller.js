@@ -108,25 +108,11 @@ async function changePassword(req, res) {
   });
 }
 
-function getMe(req, res) {
-  const user = authService.getUserProfile(req.user.id);
-  if (!user) return res.status(404).json({ error: 'User not found' });
-  return res.json({
-    id: user.id,
-    name: user.name,
-    email: user.email,
-    username: user.username,
-    role: user.role,
-    department: user.department
-  });
-}
-
 module.exports = {
   login,
   forgotPassword,
   verifyToken,
   resetPassword,
-  changePassword,
-  getMe
+  changePassword
 };
 

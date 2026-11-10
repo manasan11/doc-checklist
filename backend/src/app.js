@@ -33,7 +33,13 @@ app.get('/api', (req, res) => {
     architecture: 'Hybrid Modular Architecture with src/',
     status: 'online',
     endpoints: {
-      auth: ['POST /api/auth/login', 'POST /api/auth/forgot-password', 'POST /api/auth/reset-password', 'GET /api/auth/me'],
+      auth: [
+        'POST /api/auth/login',
+        'POST /api/auth/forgot-password',
+        'GET /api/auth/verify-reset-token',
+        'POST /api/auth/reset-password',
+        'POST /api/auth/change-password'
+      ],
       documents: ['GET /api/documents', 'POST /api/documents/:id/upload', 'PATCH /api/documents/:id/review', 'DELETE /api/documents/:id'],
       students: ['GET /api/students', 'PUT /api/students/:id', 'GET /api/students/:studentId/documents'],
       drive: ['GET /api/drive/status', 'GET /api/drive/files', 'POST /api/drive/sync', 'GET /api/drive/files/:id/view']

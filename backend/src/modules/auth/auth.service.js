@@ -147,17 +147,12 @@ async function changePassword(userId, userEmail, newPassword) {
   return { success: true, message: 'Your password has been reset successfully.' };
 }
 
-function getUserProfile(userId) {
-  return dataStore.findUserById(userId);
-}
-
 module.exports = {
   authenticate,
   generateToken,
   requestPasswordReset,
   verifyResetToken,
   resetPassword,
-  changePassword,
-  getUserProfile
+  changePassword
 };
 
