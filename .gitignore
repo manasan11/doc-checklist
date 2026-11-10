@@ -25,6 +25,7 @@ backend/uploads/*
 
 # Logs
 *.log
+*.zip
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
