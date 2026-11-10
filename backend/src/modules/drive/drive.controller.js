@@ -4,8 +4,7 @@ const driveModuleService = require('./drive.service');
 const driveService = require('../../services/drive/drive.service');
 const dataStore = require('../../dataStore');
 const driveConfig = require('../../config/drive.config');
-const { renderDocumentPage } = require('../../services/viewer/viewer.template');
-const { convertDocxBufferToHtml, convertDocxFileToHtml } = require('../../services/viewer/docx.service');
+const { renderDocumentPage, convertDocxBufferToHtml, convertDocxFileToHtml } = require('../../services/viewer/docx.service');
 
 function getMimeTypeByExtension(ext) {
   const mimeMap = {

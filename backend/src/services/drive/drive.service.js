@@ -1,10 +1,188 @@
 const fs = require('fs');
 const path = require('path');
 const { Readable } = require('stream');
+const { google } = require('googleapis');
 const driveConfig = require('../../config/drive.config');
-const driveClient = require('./drive.client');
-const appsScriptClient = require('./drive.appsscript');
 
+// 1. Apps Script Client
+class AppsScriptClient {
+  constructor() {
+    this.appsScriptUrl = driveConfig.appsScriptUrl;
+  }
+
+  isConfigured() {
+    return Boolean(this.appsScriptUrl);
+  }
+
+  async createStudentFolder(folderName, parentFolderId) {
+    if (!this.appsScriptUrl) return null;
+    try {
+      const payload = {
+        action: 'create_student_folder',
+        folderName,
+        studentFolderName: folderName,
+        parentFolderId,
+        folderId: parentFolderId
+      };
+      const res = await fetch(this.appsScriptUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        redirect: 'follow',
+        signal: AbortSignal.timeout(10000)
+      });
+      const text = await res.text();
+      let data = null;
+      try { data = JSON.parse(text); } catch (_) {}
+
+      if (data && data.success && (data.folderId || data.id)) {
+        const folderId = data.folderId || data.id;
+        return {
+          folderId,
+          folderName: data.folderName || folderName,
+          folderUrl: data.folderUrl || `https://drive.google.com/drive/folders/${folderId}`
+        };
+      }
+    } catch (err) {
+      console.warn('[AppsScript] Folder creation warning:', err.message);
+    }
+    return null;
+  }
+
+  async uploadFile({ originalname, mimetype, buffer, size, folderId, studentFolderName, targetFileName }) {
+    if (!this.appsScriptUrl) return null;
+
+    if (buffer && buffer.length > 10 * 1024 * 1024) {
+      console.log(`[AppsScript] File "${targetFileName || originalname}" is > 10MB. Streaming via direct Drive API.`);
+      return null;
+    }
+
+    try {
+      const base64 = buffer.toString('base64');
+      let targetFolderId = folderId;
+      if (!targetFolderId || targetFolderId.startsWith('gdrive_') || targetFolderId.startsWith('local_')) {
+        targetFolderId = driveConfig.folderId;
+      }
+
+      const finalFileName = targetFileName || originalname;
+      const payload = {
+        fileName: finalFileName,
+        mimeType: mimetype,
+        base64,
+        folderId: targetFolderId,
+        studentFolderName
+      };
+
+      const res = await fetch(this.appsScriptUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        redirect: 'follow',
+        signal: AbortSignal.timeout(18000)
+      });
+
+      const text = await res.text();
+      let data = null;
+      try { data = JSON.parse(text); } catch (_) {}
+
+      if (data && (data.fileId || data.id)) {
+        const fileId = data.fileId || data.id;
+        const actualFolderId = data.folderId || data.studentFolderId || targetFolderId;
+        console.log(`[Google Drive via Apps Script] Uploaded into folder ${actualFolderId}: ID=${fileId} ("${finalFileName}")`);
+        return {
+          driveFileId: fileId,
+          fileName: finalFileName,
+          mimeType: mimetype,
+          fileSize: Number(data.size) || size,
+          folderId: actualFolderId,
+          studentFolderName,
+          webViewLink: data.url || `https://drive.google.com/file/d/${fileId}/view`,
+          driveWebViewLink: data.url || `https://drive.google.com/file/d/${fileId}/view`,
+          downloadUrl: `/api/drive/files/${fileId}/download`,
+          storageType: 'google_drive_cloud',
+          uploadedAt: new Date().toISOString()
+        };
+      }
+    } catch (err) {
+      console.error('[AppsScript] Upload error:', err.message);
+    }
+    return null;
+  }
+}
+
+// 2. Drive Client (OAuth2 & Service Account)
+class DriveClient {
+  constructor() {
+    this.driveClient = null;
+    this.authMode = 'none';
+    this.oauth2Client = null;
+    this.init();
+  }
+
+  init() {
+    try {
+      if (driveConfig.clientId && driveConfig.clientSecret && driveConfig.refreshToken) {
+        this.oauth2Client = new google.auth.OAuth2(
+          driveConfig.clientId,
+          driveConfig.clientSecret,
+          driveConfig.redirectUri
+        );
+        this.oauth2Client.setCredentials({ refresh_token: driveConfig.refreshToken });
+        this.driveClient = google.drive({ version: 'v3', auth: this.oauth2Client });
+        this.authMode = 'oauth2';
+        console.log('[Google Drive] Authenticated successfully via OAuth 2.0 User Token.');
+        return;
+      }
+
+      if (driveConfig.keyFilePath && fs.existsSync(driveConfig.keyFilePath)) {
+        const auth = new google.auth.GoogleAuth({
+          keyFile: driveConfig.keyFilePath,
+          scopes: ['https://www.googleapis.com/auth/drive']
+        });
+        this.driveClient = google.drive({ version: 'v3', auth });
+        this.authMode = 'service_account';
+        console.log('[Google Drive] Authenticated successfully via Service Account key file:', driveConfig.keyFilePath);
+        return;
+      }
+
+      if (driveConfig.clientEmail && driveConfig.privateKey) {
+        const auth = new google.auth.JWT({
+          email: driveConfig.clientEmail,
+          key: driveConfig.privateKey,
+          scopes: ['https://www.googleapis.com/auth/drive']
+        });
+        this.driveClient = google.drive({ version: 'v3', auth });
+        this.authMode = 'service_account';
+        console.log('[Google Drive] Authenticated successfully via environment Service Account credentials.');
+        return;
+      }
+
+      this.driveClient = null;
+      this.authMode = 'none';
+    } catch (err) {
+      console.warn('[Google Drive] Initialization notice:', err.message);
+      this.driveClient = null;
+      this.authMode = 'none';
+    }
+  }
+
+  getClient() {
+    return this.driveClient;
+  }
+
+  getAuthMode() {
+    return this.authMode;
+  }
+
+  isConfigured() {
+    return this.driveClient !== null;
+  }
+}
+
+const driveClient = new DriveClient();
+const appsScriptClient = new AppsScriptClient();
+
+// 3. Central Google Drive Service
 class DriveService {
   constructor() {
     this.folderId = driveConfig.folderId;
@@ -43,7 +221,6 @@ class DriveService {
     }
     const parentId = parentFolderId || this.folderId;
 
-    // 1. Try Apps Script Web App
     if (appsScriptClient.isConfigured()) {
       const scriptResult = await appsScriptClient.createStudentFolder(folderName, parentId);
       if (scriptResult) {
@@ -53,13 +230,13 @@ class DriveService {
       }
     }
 
-    // 2. Direct Google Drive API
     if (this.isLiveDriveConfigured()) {
       try {
         const client = driveClient.getClient();
         const escapedName = folderName.replace(/'/g, "\\'");
         const query = `'${parentId}' in parents and name = '${escapedName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
-        const listRes = await client.files.list({
+
+        const res = await client.files.list({
           q: query,
           fields: 'files(id, name, webViewLink)',
           spaces: 'drive',
@@ -67,122 +244,75 @@ class DriveService {
           includeItemsFromAllDrives: true
         });
 
-        if (listRes.data.files && listRes.data.files.length > 0) {
-          const existing = listRes.data.files[0];
-          console.log(`[Google Drive API] Reusing existing folder "${folderName}": ID=${existing.id}`);
-          client.permissions.create({
-            fileId: existing.id,
-            supportsAllDrives: true,
-            requestBody: { role: 'writer', type: 'anyone' }
-          }).catch(() => {});
-
+        if (res.data.files && res.data.files.length > 0) {
+          const folder = res.data.files[0];
           const result = {
-            folderId: existing.id,
-            folderName: existing.name,
-            folderUrl: existing.webViewLink || `https://drive.google.com/drive/folders/${existing.id}`
+            folderId: folder.id,
+            folderName: folder.name,
+            folderUrl: folder.webViewLink || `https://drive.google.com/drive/folders/${folder.id}`
           };
           this.folderCache.set(folderName, result);
-          this.verifiedFoldersSet.add(existing.id);
+          this.verifiedFoldersSet.add(folder.id);
           return result;
         }
 
         const createRes = await client.files.create({
-          supportsAllDrives: true,
-          requestBody: {
+          resource: {
             name: folderName,
             mimeType: 'application/vnd.google-apps.folder',
             parents: [parentId]
           },
-          fields: 'id, name, webViewLink'
-        });
-
-        client.permissions.create({
-          fileId: createRes.data.id,
-          supportsAllDrives: true,
-          requestBody: { role: 'writer', type: 'anyone' }
-        }).catch(() => {});
-
-        console.log(`[Google Drive API] Dynamically created student folder "${folderName}": ID=${createRes.data.id}`);
-        const result = {
-          folderId: createRes.data.id,
-          folderName: createRes.data.name,
-          folderUrl: createRes.data.webViewLink || `https://drive.google.com/drive/folders/${createRes.data.id}`
-        };
-        this.folderCache.set(folderName, result);
-        this.verifiedFoldersSet.add(createRes.data.id);
-        return result;
-      } catch (apiErr) {
-        console.warn('[Google Drive API] Folder creation notice:', apiErr.message);
-      }
-    }
-
-    // 3. Fallback / Emulated storage
-    const mockFolderId = `gdrive_folder_${folderName}_${Date.now()}`;
-    const fallbackResult = {
-      folderId: mockFolderId,
-      folderName,
-      folderUrl: `https://drive.google.com/drive/folders/${this.folderId}`
-    };
-    this.folderCache.set(folderName, fallbackResult);
-    return fallbackResult;
-  }
-
-  async verifyFolderExists(folderId) {
-    if (!folderId || folderId.startsWith('gdrive_') || folderId.startsWith('local_')) return false;
-    if (this.verifiedFoldersSet.has(folderId)) return true;
-    if (this.isLiveDriveConfigured()) {
-      try {
-        const client = driveClient.getClient();
-        const res = await client.files.get({
-          fileId: folderId,
-          fields: 'id, name, trashed, mimeType',
+          fields: 'id, name, webViewLink',
           supportsAllDrives: true
         });
-        if (res.data && !res.data.trashed && res.data.mimeType === 'application/vnd.google-apps.folder') {
-          this.verifiedFoldersSet.add(folderId);
-          return true;
-        }
-      } catch (_) {
-        return false;
+
+        const created = createRes.data;
+        const result = {
+          folderId: created.id,
+          folderName: created.name,
+          folderUrl: created.webViewLink || `https://drive.google.com/drive/folders/${created.id}`
+        };
+        this.folderCache.set(folderName, result);
+        this.verifiedFoldersSet.add(created.id);
+        return result;
+      } catch (err) {
+        console.warn(`[Google Drive] Direct API folder creation error for "${folderName}":`, err.message);
       }
     }
-    return false;
+
+    const fallbackId = `gdrive_folder_${folderName.replace(/\W+/g, '_')}`;
+    const fallback = {
+      folderId: fallbackId,
+      folderName,
+      folderUrl: `https://drive.google.com/drive/folders/${fallbackId}`
+    };
+    this.folderCache.set(folderName, fallback);
+    return fallback;
   }
 
   async uploadFile({ originalname, mimetype, buffer, size, folderId, studentFolderName, targetFileName }) {
-    let targetFolderId = folderId;
-    if (!targetFolderId || targetFolderId.startsWith('gdrive_') || targetFolderId.startsWith('local_')) {
-      targetFolderId = this.folderId;
-    }
     const finalFileName = targetFileName || originalname;
 
-    // 1. Try Apps Script if configured
     if (appsScriptClient.isConfigured()) {
       const scriptResult = await appsScriptClient.uploadFile({
         originalname,
         mimetype,
         buffer,
         size,
-        folderId: targetFolderId,
+        folderId,
         studentFolderName,
         targetFileName: finalFileName
       });
-      if (scriptResult) {
-        scriptResult.fileName = finalFileName;
-        scriptResult.savedFileName = null;
-        return scriptResult;
-      }
+      if (scriptResult) return scriptResult;
     }
 
-    // 2. Direct Google Drive API
     if (this.isLiveDriveConfigured()) {
       try {
         const client = driveClient.getClient();
-        const fileMetadata = {
-          name: finalFileName,
-          parents: targetFolderId ? [targetFolderId] : undefined,
-          description: `Uploaded via Document Checklist System at ${new Date().toISOString()}`
-        };
+        let targetFolderId = folderId;
+        if (!targetFolderId || targetFolderId.startsWith('gdrive_') || targetFolderId.startsWith('local_')) {
+          targetFolderId = this.folderId;
+        }
 
         const readableStream = new Readable();
         readableStream.push(buffer);
@@ -190,185 +320,162 @@ class DriveService {
 
         const media = {
           mimeType: mimetype,
-          body: readableStream,
+          body: readableStream
         };
 
         const res = await client.files.create({
-          supportsAllDrives: true,
-          resource: fileMetadata,
-          media: media,
-          fields: 'id, name, webViewLink, webContentLink, size, mimeType, createdTime',
+          resource: {
+            name: finalFileName,
+            parents: [targetFolderId]
+          },
+          media,
+          fields: 'id, name, size, webViewLink, webContentLink, mimeType',
+          supportsAllDrives: true
         });
 
-        client.permissions.create({
-          fileId: res.data.id,
-          supportsAllDrives: true,
-          requestBody: { role: 'reader', type: 'anyone' }
-        }).catch(() => {});
+        const file = res.data;
+        console.log(`[Google Drive Direct API] Uploaded to folder ${targetFolderId}: ID=${file.id} ("${file.name}")`);
 
-        console.log(`[Google Drive] File uploaded successfully to folder ${targetFolderId}: ID=${res.data.id}`);
+        try {
+          await client.permissions.create({
+            fileId: file.id,
+            resource: { role: 'reader', type: 'anyone' },
+            supportsAllDrives: true
+          });
+        } catch (_) {}
 
         return {
-          driveFileId: res.data.id,
-          fileName: finalFileName,
-          savedFileName: null,
-          mimeType: res.data.mimeType || mimetype,
-          fileSize: Number(res.data.size) || size,
+          driveFileId: file.id,
+          fileName: file.name,
+          mimeType: file.mimeType || mimetype,
+          fileSize: Number(file.size) || size,
           folderId: targetFolderId,
           studentFolderName,
-          webViewLink: res.data.webViewLink || `https://drive.google.com/file/d/${res.data.id}/view`,
-          driveWebViewLink: res.data.webViewLink || `https://drive.google.com/file/d/${res.data.id}/view`,
-          downloadUrl: `/api/drive/files/${res.data.id}/download`,
+          webViewLink: file.webViewLink,
+          driveWebViewLink: file.webViewLink,
+          downloadUrl: `/api/drive/files/${file.id}/download`,
           storageType: 'google_drive_cloud',
-          uploadedAt: res.data.createdTime || new Date().toISOString()
+          uploadedAt: new Date().toISOString()
         };
       } catch (err) {
-        console.error('[Google Drive] Upload notice:', err.message);
+        console.error('[Google Drive] Direct API upload error:', err.message);
       }
     }
 
-    // 3. Emulated Google Drive Storage fallback
-    const mockDriveId = `gdrive_${Math.random().toString(36).substring(2, 11)}_${Date.now()}`;
+    // Local disk fallback
+    const uploadsDir = driveConfig.uploadsDir;
+    if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+    const localId = `local_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    const savedFileName = `${localId}_${finalFileName}`;
+    fs.writeFileSync(path.join(uploadsDir, savedFileName), buffer);
+
     return {
-      driveFileId: mockDriveId,
+      driveFileId: localId,
       fileName: finalFileName,
-      savedFileName: null,
-      mimeType,
+      savedFileName,
+      mimeType: mimetype,
       fileSize: size,
-      folderId: targetFolderId,
+      folderId: folderId || 'local_folder',
       studentFolderName,
-      webViewLink: `/api/drive/files/${mockDriveId}/view`,
-      driveWebViewLink: `/api/drive/files/${mockDriveId}/view`,
-      downloadUrl: `/api/drive/files/${mockDriveId}/download`,
-      storageType: 'google_drive_emulated',
+      webViewLink: `/api/drive/files/${localId}/view`,
+      driveWebViewLink: `/api/drive/files/${localId}/view`,
+      downloadUrl: `/api/drive/files/${localId}/download`,
+      storageType: 'local_fallback',
       uploadedAt: new Date().toISOString()
     };
   }
 
-  async getFileStream(driveFileId) {
-    if (this.isLiveDriveConfigured() && driveFileId && !driveFileId.startsWith('gdrive_')) {
-      const client = driveClient.getClient();
-      const response = await client.files.get(
-        { fileId: driveFileId, alt: 'media', supportsAllDrives: true },
-        { responseType: 'stream' }
-      );
-      return response.data;
-    }
-    return null;
-  }
-
-  async getFileMetadata(driveFileId) {
-    if (this.isLiveDriveConfigured() && driveFileId && !driveFileId.startsWith('gdrive_')) {
-      const client = driveClient.getClient();
-      const response = await client.files.get({
-        fileId: driveFileId,
-        fields: 'id, name, mimeType, size, webViewLink, webContentLink, createdTime, parents',
-        supportsAllDrives: true
-      });
-      return response.data;
-    }
-    return null;
-  }
-
-  async deleteFile(driveFileId, savedFileName) {
-    if (this.isLiveDriveConfigured() && driveFileId && !driveFileId.startsWith('gdrive_')) {
-      try {
-        const client = driveClient.getClient();
-        await client.files.delete({ fileId: driveFileId, supportsAllDrives: true });
-        return { success: true };
-      } catch (err) {
-        console.warn('[Google Drive] Notice deleting cloud file:', err.message);
-      }
-    }
-
-    if (savedFileName) {
-      const localFilePath = path.join(driveConfig.uploadsDir, savedFileName);
-      if (fs.existsSync(localFilePath)) {
-        try { fs.unlinkSync(localFilePath); } catch (_) {}
-      }
-    }
-    return { success: true };
-  }
-
-  async listFiles(targetFolderId) {
-    const folderId = targetFolderId || this.folderId;
-
+  async listFiles(folderId = null) {
+    const targetFolder = folderId || this.folderId;
     if (this.isLiveDriveConfigured()) {
       try {
         const client = driveClient.getClient();
-        const query = folderId 
-          ? `'${folderId}' in parents and trashed = false`
-          : 'trashed = false';
-
         const res = await client.files.list({
-          q: query,
-          fields: 'files(id, name, mimeType, size, webViewLink, webContentLink, createdTime, modifiedTime, thumbnailLink, iconLink)',
-          orderBy: 'modifiedTime desc',
+          q: `'${targetFolder}' in parents and trashed = false`,
+          fields: 'files(id, name, size, mimeType, webViewLink, webContentLink, createdTime)',
+          spaces: 'drive',
           supportsAllDrives: true,
-          includeItemsFromAllDrives: true,
-          pageSize: 100
+          includeItemsFromAllDrives: true
         });
 
         const files = (res.data.files || []).map(f => ({
           driveFileId: f.id,
           fileName: f.name,
-          mimeType: f.mimeType,
           fileSize: Number(f.size) || 0,
+          mimeType: f.mimeType,
           createdTime: f.createdTime,
-          modifiedTime: f.modifiedTime,
-          webViewLink: f.webViewLink || `https://drive.google.com/file/d/${f.id}/view`,
-          driveWebViewLink: f.webViewLink || `https://drive.google.com/file/d/${f.id}/view`,
+          webViewLink: f.webViewLink,
+          driveWebViewLink: f.webViewLink,
           downloadUrl: `/api/drive/files/${f.id}/download`,
-          cloudDownloadUrl: f.webContentLink || `https://drive.google.com/uc?id=${f.id}&export=download`,
-          thumbnailLink: f.thumbnailLink || null,
-          iconLink: f.iconLink || null,
           storageType: 'google_drive_cloud'
         }));
 
         return {
           source: 'google_drive_cloud',
-          folderId,
-          folderUrl: `https://drive.google.com/drive/folders/${folderId}`,
-          count: files.length,
+          folderId: targetFolder,
+          totalFiles: files.length,
           files
         };
       } catch (err) {
-        console.error('[Google Drive] listFiles error:', err.message);
-      }
-    }
-
-    const files = [];
-    if (fs.existsSync(driveConfig.uploadsDir)) {
-      const dirFiles = fs.readdirSync(driveConfig.uploadsDir);
-      for (const fileName of dirFiles) {
-        if (fileName === '.gitkeep') continue;
-        const filePath = path.join(driveConfig.uploadsDir, fileName);
-        const stats = fs.statSync(filePath);
-        const parts = fileName.split('_');
-        const originalName = parts.length > 1 ? parts.slice(1).join('_') : fileName;
-        files.push({
-          driveFileId: `local_${fileName}`,
-          fileName: originalName,
-          savedFileName: fileName,
-          fileSize: stats.size,
-          createdTime: stats.birthtime.toISOString(),
-          modifiedTime: stats.mtime.toISOString(),
-          webViewLink: `/api/drive/files/local_${fileName}/view`,
-          downloadUrl: `/api/drive/files/local_${fileName}/download`,
-          storageType: 'google_drive_emulated'
-        });
+        console.warn('[Google Drive] List files error:', err.message);
       }
     }
 
     return {
-      source: 'google_drive_emulated',
-      folderId: folderId || null,
-      folderUrl: folderId ? `https://drive.google.com/drive/folders/${folderId}` : null,
-      count: files.length,
-      files
+      source: 'emulated',
+      folderId: targetFolder,
+      totalFiles: 0,
+      files: []
     };
+  }
+
+  async getFileMetadata(fileId) {
+    if (this.isLiveDriveConfigured() && !fileId.startsWith('local_') && !fileId.startsWith('gdrive_')) {
+      try {
+        const client = driveClient.getClient();
+        const res = await client.files.get({
+          fileId,
+          fields: 'id, name, size, mimeType, webViewLink',
+          supportsAllDrives: true
+        });
+        return res.data;
+      } catch (err) {
+        console.warn(`[Google Drive] Metadata error for ${fileId}:`, err.message);
+      }
+    }
+    return null;
+  }
+
+  async getFileStream(fileId) {
+    if (this.isLiveDriveConfigured() && !fileId.startsWith('local_') && !fileId.startsWith('gdrive_')) {
+      try {
+        const client = driveClient.getClient();
+        const res = await client.files.get(
+          { fileId, alt: 'media', supportsAllDrives: true },
+          { responseType: 'stream' }
+        );
+        return res.data;
+      } catch (err) {
+        console.warn(`[Google Drive] Download stream error for ${fileId}:`, err.message);
+      }
+    }
+    return null;
+  }
+
+  async deleteFile(fileId) {
+    if (!fileId) return false;
+    if (this.isLiveDriveConfigured() && !fileId.startsWith('local_') && !fileId.startsWith('gdrive_')) {
+      try {
+        const client = driveClient.getClient();
+        await client.files.delete({ fileId, supportsAllDrives: true });
+        return true;
+      } catch (err) {
+        console.warn(`[Google Drive] Delete error for ${fileId}:`, err.message);
+        return false;
+      }
+    }
+    return false;
   }
 }
 
 module.exports = new DriveService();
-
