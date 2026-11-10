@@ -12,10 +12,10 @@ import { NotificationService } from '../../services/notification.service';
   template: `
     <div class="login-container">
       <div class="login-card">
-        <!-- Brand Header -->
+        <!-- Brand Header with Official Logo -->
         <div class="card-header">
-          <div class="brand-badge">
-            <span class="brand-name">Ysquare</span>
+          <div class="brand-logo-wrapper">
+            <img src="ysquare-logo.jpg" alt="Ysquare - Achieve Your Global Dreams" class="brand-logo" />
           </div>
           <h1 class="card-title">
             @if (currentView() === 'login') {
@@ -26,19 +26,19 @@ import { NotificationService } from '../../services/notification.service';
               Reset Password
             }
           </h1>
-          @if (currentView() !== 'login') {
-            <p class="card-subtitle">
-              @if (currentView() === 'forgot') {
-                Enter your registered email or username to reset your password
+          <p class="card-subtitle">
+            @if (currentView() === 'login') {
+              Enter your credentials to access your document portal
+            } @else if (currentView() === 'forgot') {
+              Enter your registered email or username to reset your password
+            } @else {
+              @if (targetEmail()) {
+                Create a new secure password for {{ targetEmail() }}
               } @else {
-                @if (targetEmail()) {
-                  Create a new secure password for {{ targetEmail() }}
-                } @else {
-                  Enter your new password below
-                }
+                Enter your new password below
               }
-            </p>
-          }
+            }
+          </p>
         </div>
 
         <!-- 1. LOGIN VIEW -->
@@ -339,35 +339,23 @@ import { NotificationService } from '../../services/notification.service';
       text-align: center;
     }
 
-    .brand-badge {
-      display: inline-flex;
+    .brand-logo-wrapper {
+      display: flex;
+      justify-content: center;
       align-items: center;
-      gap: 6px;
-      background: #FFF7ED;
-      border: 1px solid #FED7AA;
-      padding: 4px 12px;
-      border-radius: 999px;
-      margin-bottom: 12px;
+      margin-bottom: 16px;
     }
 
-    .brand-name {
-      font-size: 0.8rem;
-      font-weight: 700;
-      color: #EA580C;
-      letter-spacing: 0.5px;
+    .brand-logo {
+      max-width: 220px;
+      width: 100%;
+      height: auto;
+      object-fit: contain;
+      transition: transform 0.2s ease;
     }
 
-    .brand-dot {
-      width: 4px;
-      height: 4px;
-      background-color: #FDBA74;
-      border-radius: 50%;
-    }
-
-    .brand-sub {
-      font-size: 0.75rem;
-      font-weight: 500;
-      color: #9A3412;
+    .brand-logo:hover {
+      transform: scale(1.02);
     }
 
     .card-title {
