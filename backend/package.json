@@ -7,10 +7,7 @@
     "prestart": "node ../cleanup-ports.js",
     "start": "node --watch-path=. server.js",
     "predev": "node ../cleanup-ports.js",
-    "dev": "node --watch-path=. server.js",
-    "test:drive": "node scripts/test-drive.js",
-    "test:mysql": "node scripts/test-mysql.js",
-    "connect-drive": "node scripts/setup-oauth.js"
+    "dev": "node --watch-path=. server.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
