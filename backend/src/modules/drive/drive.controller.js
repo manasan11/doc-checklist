@@ -6,7 +6,7 @@ const dataStore = require('../../dataStore');
 const driveConfig = require('../../config/drive.config');
 const { renderDocumentPage } = require('../../services/viewer/viewer.template');
 const { convertDocxBufferToHtml, convertDocxFileToHtml } = require('../../services/viewer/docx.service');
-const { getMimeTypeByExtension } = require('../../common/utils/file.util');
+const { getMimeTypeByExtension } = require('../../common/utils');
 
 function getStatus(req, res) {
   return res.json(driveModuleService.getStatus());

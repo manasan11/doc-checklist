@@ -1,7 +1,7 @@
 const dataStore = require('../../dataStore');
 const driveService = require('../../services/drive/drive.service');
 const studentRepo = require('../students/student.repository');
-const { generateFilenameFromDocType } = require('../../common/utils/file.util');
+const { generateFilenameFromDocType } = require('../../common/utils');
 const db = require('../../config/database');
 
 async function ensureUserDriveFolder(user) {
