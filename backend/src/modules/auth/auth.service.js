@@ -119,17 +119,6 @@ async function changePassword(userId, userEmail, newPassword) {
     return { success: false, error: result.message || 'Failed to update password.' };
   }
 
-  try {
-    const user = dataStore.findUserById(userId);
-    const studentCode = user?.studentCode || (String(userId).includes('STU') ? String(userId).replace(/^u-/, '') : null);
-    const cleanEmail = (userEmail || user?.email || '').toLowerCase().trim();
-    const cleanUsername = (user?.username || '').toLowerCase().trim();
-
-    await db.updateUserPassword(studentCode, cleanEmail, cleanUsername, newPassword);
-  } catch (err) {
-    console.warn('[AuthService] MySQL notice updating password:', err.message);
-  }
-
   return { success: true, message: 'Your password has been reset successfully.' };
 }
 

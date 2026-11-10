@@ -92,13 +92,23 @@ async function updateUserPassword(studentCode, email, username, newPassword) {
   if (!pool) return false;
   const cleanEmail = email ? String(email).toLowerCase().trim() : null;
   const cleanUsername = username ? String(username).toLowerCase().trim() : null;
-  const cleanCode = studentCode ? String(studentCode).trim() : null;
+  const cleanCode = studentCode ? String(studentCode).replace(/^u-/, '').trim() : null;
+  const numPart = cleanCode ? cleanCode.replace(/\D/g, '') : null;
 
   let updated = false;
   try {
     const [stuRes] = await pool.query(
-      'UPDATE student SET Password = ? WHERE (Student_Id IS NOT NULL AND Student_Id = ?) OR (LOWER(TRIM(Email)) = ? AND Email IS NOT NULL AND Email != "") OR (LOWER(TRIM(Username)) = ? AND Username IS NOT NULL AND Username != "")',
-      [newPassword, cleanCode, cleanEmail, cleanUsername || cleanEmail]
+      `UPDATE student SET Password = ? 
+       WHERE (Student_Id IS NOT NULL AND (Student_Id = ? OR Student_Id = ?)) 
+          OR (Unique_Id IS NOT NULL AND (Unique_Id = ? OR Unique_Id LIKE ?)) 
+          OR (LOWER(TRIM(Email)) = ? AND Email IS NOT NULL AND Email != "") 
+          OR (LOWER(TRIM(Username)) = ? AND Username IS NOT NULL AND Username != "")`,
+      [
+        newPassword,
+        cleanCode, numPart || cleanCode,
+        cleanCode, `${cleanCode}%`,
+        cleanEmail, cleanUsername || cleanEmail
+      ]
     );
     updated = Boolean(stuRes && (stuRes.affectedRows > 0 || stuRes.changedRows > 0));
   } catch (err) {

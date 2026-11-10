@@ -377,10 +377,22 @@ class DataStore {
     try {
       const stu = await db.findUserByIdentifier(cleanId);
       if (stu) {
-        const expectedPass = stu.password ? String(stu.password).trim() : 'Password123';
+        const localUser = this.findUserById(stu.id) || this.findUserByEmailOrUsername(cleanLower);
+        let expectedPass = null;
+        if (stu.password && String(stu.password).trim()) {
+          expectedPass = String(stu.password).trim();
+        } else if (localUser && localUser.password && String(localUser.password).trim()) {
+          expectedPass = String(localUser.password).trim();
+        } else {
+          expectedPass = 'Password123';
+        }
+
         const match = expectedPass === String(password).trim();
         if (!match) return { error: 'Incorrect password.' };
         const user = await this.findOrLoadUser(stu.id);
+        if (user) {
+          user.password = expectedPass;
+        }
         return user || stu;
       }
     } catch (err) {
@@ -1020,7 +1032,10 @@ class DataStore {
 
   async updateUserPassword(userId, newPassword) {
     this.data = this.load();
-    const user = this.findUserById(userId);
+    let user = this.findUserById(userId);
+    if (!user) {
+      user = await this.findOrLoadUser(userId);
+    }
     if (!user) {
       return { success: false, message: "User account not found." };
     }
@@ -1028,7 +1043,7 @@ class DataStore {
     user.password = newPassword;
 
     try {
-      const studentCode = user.studentCode || (String(userId).includes('STU') ? String(userId).replace(/^u-/, '') : null);
+      const studentCode = user.studentCode || String(userId || '').replace(/^u-/, '').trim();
       const cleanEmail = (user.email || '').toLowerCase().trim();
       const cleanUsername = (user.username || '').toLowerCase().trim();
       await db.updateUserPassword(studentCode, cleanEmail, cleanUsername, newPassword);
