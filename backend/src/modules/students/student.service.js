@@ -1,5 +1,5 @@
 const dataStore = require('../../dataStore');
-const studentRepo = require('./student.repository');
+const db = require('../../config/database');
 
 async function getAllStudents() {
   return await dataStore.getStudentList();
@@ -7,7 +7,7 @@ async function getAllStudents() {
 
 async function updateStudent(studentId, details) {
   const cleanId = String(studentId).replace(/^u-/, '').trim();
-  const dbSuccess = await studentRepo.updateStudentDetails(cleanId, details);
+  const dbSuccess = await db.updateStudentDetails(cleanId, details);
 
   const updates = {};
   if (details.name !== undefined) updates.name = details.name;

@@ -1,7 +1,6 @@
 const path = require('path');
 const dataStore = require('../../dataStore');
 const driveService = require('../../services/drive/drive.service');
-const studentRepo = require('../students/student.repository');
 const db = require('../../config/database');
 
 function generateFilenameFromDocType(documentType, originalname) {
@@ -80,7 +79,7 @@ async function getChecklist(targetUserId, studentIdParam, deptIdParam, syncDrive
   if (studentIdParam || deptIdParam) {
     try {
       const lookupStudent = studentIdParam || targetUserId;
-      const fRecord = await studentRepo.getFollowupUserByStudentAndDept(lookupStudent, deptIdParam);
+      const fRecord = await db.getFollowupUserByStudentAndDept(lookupStudent, deptIdParam);
       if (fRecord) {
         followup = {
           studentFollowUpId: fRecord.Student_FollowUp_Id,
@@ -127,7 +126,7 @@ async function getChecklist(targetUserId, studentIdParam, deptIdParam, syncDrive
 
 async function getFollowupDocuments(studentId, deptId) {
   const cleanStudentCode = String(studentId).replace(/^u-/, '').trim();
-  const followupRecord = await studentRepo.getFollowupUserByStudentAndDept(cleanStudentCode, deptId);
+  const followupRecord = await db.getFollowupUserByStudentAndDept(cleanStudentCode, deptId);
 
   const associatedUserId = followupRecord ? followupRecord.User_Id : null;
   const associatedUserName = followupRecord ? followupRecord.UserName : null;
