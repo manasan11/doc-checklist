@@ -15,3 +15,4 @@ const INITIAL_DOCUMENTS = [
 module.exports = {
   INITIAL_DOCUMENTS
 };
+

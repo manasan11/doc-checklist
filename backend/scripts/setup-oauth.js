@@ -5,7 +5,8 @@ const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
 
-require('dotenv').config({ path: path.join(__dirname, '.env') });
+const envPath = path.resolve(__dirname, '../.env');
+require('dotenv').config({ path: envPath });
 
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '801172938885-s3pvaqv7diouqk54cincd01o6ve93pn6.apps.googleusercontent.com';
 const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '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';
@@ -46,36 +47,43 @@ const server = http.createServer(async (req, res) => {
       }
 
       // Save credentials and refresh token to .env
-      const envPath = path.join(__dirname, '.env');
       let envData = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
 
-      if (tokens.refresh_token) {
-        if (envData.includes('GOOGLE_REFRESH_TOKEN=')) {
-          envData = envData.replace(/GOOGLE_REFRESH_TOKEN=.*/g, `GOOGLE_REFRESH_TOKEN=${tokens.refresh_token}`);
+      const updates = {
+        GOOGLE_CLIENT_ID: CLIENT_ID,
+        GOOGLE_CLIENT_SECRET: CLIENT_SECRET,
+        GOOGLE_REFRESH_TOKEN: tokens.refresh_token || '',
+        GOOGLE_REDIRECT_URI: 'http://localhost:5000/api/drive/oauth2callback'
+      };
+
+      for (const [key, val] of Object.entries(updates)) {
+        if (!val) continue;
+        const regex = new RegExp(`^${key}=.*$`, 'm');
+        if (regex.test(envData)) {
+          envData = envData.replace(regex, `${key}=${val}`);
         } else {
-          envData += `\nGOOGLE_REFRESH_TOKEN=${tokens.refresh_token}\n`;
+          envData += `\n${key}=${val}`;
         }
       }
 
-      fs.writeFileSync(envPath, envData, 'utf8');
+      fs.writeFileSync(envPath, envData.trim() + '\n', 'utf8');
 
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      console.log('\n Authorization Successful!');
+      console.log('Credentials and Refresh Token have been saved to your .env file.');
+      console.log('You can now restart the backend to start using live Google Drive uploads with user quota.\n');
+
+      res.writeHead(200, { 'Content-Type': 'text/html' });
       res.end(`
-        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; text-align: center; padding: 60px 20px; background: #FAF7F2; min-height: 100vh;">
-          <div style="max-width: 520px; margin: 0 auto; background: white; padding: 40px; border-radius: 16px; border: 1px solid #EAE3D8; box-shadow: 0 10px 30px rgba(0,0,0,0.05);">
-            <div style="font-size: 48px; margin-bottom: 16px;">✅</div>
-            <h1 style="color: #059669; margin: 0 0 12px 0; font-size: 24px;">Google Drive Connected Successfully!</h1>
-            <p style="color: #57534E; font-size: 15px; line-height: 1.6; margin-bottom: 24px;">
-              Your Google account has been authorized. The target folder (<strong>${process.env.GOOGLE_DRIVE_FOLDER_ID || '1suDPKDdeXmrBIIPG4W3FUnL4ZQbBqaNk'}</strong>) is now linked with your personal Drive quota.
-            </p>
-            <p style="color: #A8A29E; font-size: 13px;">You can close this tab and return to Ysquare.</p>
-          </div>
-        </div>
+        <!DOCTYPE html>
+        <html>
+        <head><title>Authorization Successful</title></head>
+        <body style="font-family: sans-serif; text-align: center; padding: 50px;">
+          <h1 style="color: #16a34a;"> Authorization Successful!</h1>
+          <p>Your Google Drive OAuth2 tokens have been saved to the backend <code>.env</code> file.</p>
+          <p>You can close this window and return to your terminal.</p>
+        </body>
+        </html>
       `);
-
-      console.log('\n[SUCCESS] OAuth2 tokens received and saved to backend/.env!');
-      console.log('Refresh Token saved successfully.');
-      console.log('Closing authorization server...\n');
 
       setTimeout(() => {
         server.close();
@@ -83,20 +91,22 @@ const server = http.createServer(async (req, res) => {
       }, 2000);
 
     } catch (err) {
-      console.error('Error exchanging authorization code:', err.message);
+      console.error('\nError exchanging authorization code for tokens:', err.message);
       res.writeHead(500, { 'Content-Type': 'text/plain' });
-      res.end('Authentication failed: ' + err.message);
+      res.end('Error exchanging code: ' + err.message);
     }
-  } else if (reqUrl.query.error) {
-    console.error('Google OAuth Error:', reqUrl.query.error);
+  } else {
     res.writeHead(400, { 'Content-Type': 'text/plain' });
-    res.end('Authorization denied: ' + reqUrl.query.error);
+    res.end('No authorization code found in request.');
   }
 });
 
 server.listen(PORT, () => {
-  const startCmd = process.platform === 'win32' ? `start "" "${authUrl}"` : `open "${authUrl}"`;
-  exec(startCmd, (err) => {
-    if (err) console.log('Could not open browser automatically. Please open the link manually.');
+  // Open URL in default browser
+  const startCmd = process.platform === 'darwin' ? 'open' : (process.platform === 'win32' ? 'start' : 'xdg-open');
+  exec(`${startCmd} "${authUrl}"`, (err) => {
+    if (err) {
+      // Ignored if browser cannot be launched in headless environments
+    }
   });
 });

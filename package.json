@@ -13,7 +13,7 @@
     "preserver": "node cleanup-ports.js",
     "server": "npm --prefix backend start",
     "client": "npm --prefix frontend start",
-    "connect-drive": "node backend/setup-oauth.js",
+    "connect-drive": "node backend/scripts/setup-oauth.js",
     "test:drive": "npm --prefix backend run test:drive",
     "build": "npm --prefix frontend run build",
     "install:frontend": "npm --prefix frontend install",

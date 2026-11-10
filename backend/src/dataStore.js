@@ -150,7 +150,7 @@ class DataStore {
       return this.cachedStudentList;
     }
     try {
-      const db = require('../db');
+      const db = require('./config/database');
       const students = await db.loadActiveStudents();
       this.cachedStudentList = (students || []).map(s => {
         const studentCode = String(s.Student_Id || s.Unique_Id || '').trim();
@@ -237,7 +237,7 @@ class DataStore {
     if (existing) return existing;
 
     try {
-      const db = require('../db');
+      const db = require('./config/database');
       const rawId = String(userId).replace(/^u-/, '').trim();
       const s = await db.findUserByIdentifier(rawId);
       if (s) {
@@ -322,7 +322,7 @@ class DataStore {
     if (user.role === 'admin') return [];
 
     try {
-      const db = require('../db');
+      const db = require('./config/database');
       const defaultDocTemplates = await this.getMasterDocTemplates();
       const userDocs = JSON.parse(JSON.stringify(defaultDocTemplates));
 
@@ -408,7 +408,7 @@ class DataStore {
 
     // 2. Fast indexed check against MySQL student table (~30ms)
     try {
-      const db = require('../db');
+      const db = require('./config/database');
       const stu = await db.findUserByIdentifier(cleanId);
       if (stu) {
         const expectedPass = stu.password ? String(stu.password).trim() : 'Password123';
@@ -763,7 +763,7 @@ class DataStore {
 
   async syncSingleUploadToMysql(userId, doc, fileResult, userNotes = "") {
     try {
-      const db = require('../db');
+      const db = require('./config/database');
 
       const user = this.findUserById(userId);
       const studentCode = user?.studentCode || (userId && userId.includes('STU') ? userId.replace(/^u-/, '') : `STU${String((userId || '').replace(/\D/g, '') || 1).padStart(3, '0')}`);
@@ -823,7 +823,7 @@ class DataStore {
   }
 
   async deleteDocument(userId, docId, versionNumber) {
-    const db = require('../db');
+    const db = require('./config/database');
     const numericDocId = parseInt(docId, 10);
 
     const user = this.findUserById(userId);
@@ -1009,7 +1009,7 @@ class DataStore {
 
     if (vStatus !== null) {
       try {
-        const db = require('../db');
+        const db = require('./config/database');
         const cleanCode = user.studentCode || String(userId).replace(/^u-/, '');
         if (vStatus === 2) {
           doc.rejectionReason = finalReason || '';
@@ -1085,7 +1085,7 @@ class DataStore {
     // 1. Update in MySQL student table and users table via stored query in db.js
     let mysqlUpdated = false;
     try {
-      const db = require('../db');
+      const db = require('./config/database');
       mysqlUpdated = await db.updateUserPassword(studentCode, targetEmail, targetUsername || targetEmail, newPassword);
       console.log(`[DataStore] MySQL student password updated: studentCode=${studentCode}, email=${targetEmail}, updated=${mysqlUpdated}`);
     } catch (err) {
@@ -1129,7 +1129,7 @@ class DataStore {
 
     // Update in MySQL student table via stored query in db.js
     try {
-      const db = require('../db');
+      const db = require('./config/database');
       const studentCode = user.studentCode || (String(userId).includes('STU') ? String(userId).replace(/^u-/, '') : null);
       const cleanEmail = (user.email || '').toLowerCase().trim();
       const cleanUsername = (user.username || '').toLowerCase().trim();

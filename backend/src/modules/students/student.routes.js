@@ -8,3 +8,4 @@ router.put('/:id', authenticateToken, studentController.updateStudent);
 router.patch('/:id', authenticateToken, studentController.updateStudent);
 
 module.exports = router;
+

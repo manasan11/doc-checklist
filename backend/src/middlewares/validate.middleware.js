@@ -26,3 +26,4 @@ function validateRequired(fields = [], source = 'body') {
 module.exports = {
   validateRequired
 };
+

@@ -25,3 +25,4 @@ function formatUploadDateTime(val) {
 module.exports = {
   formatUploadDateTime
 };
+

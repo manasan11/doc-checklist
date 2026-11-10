@@ -61,3 +61,4 @@ function getPasswordResetHtml({ displayName, resetLink, to, year = new Date().ge
 module.exports = {
   getPasswordResetHtml
 };
+

@@ -19,3 +19,4 @@ router.patch('/:id/verification-status', authenticateToken, documentController.r
 router.delete('/:id', authenticateToken, documentController.deleteDocument);
 
 module.exports = router;
+

@@ -14,3 +14,4 @@ router.post('/change-password', authenticateToken, authController.changePassword
 router.get('/me', authenticateToken, authController.getMe);
 
 module.exports = router;
+

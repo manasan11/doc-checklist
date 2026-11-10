@@ -226,3 +226,4 @@ module.exports = {
   updateStudentDocumentVerificationStatus,
   updateStudentDocumentStaff
 };
+
