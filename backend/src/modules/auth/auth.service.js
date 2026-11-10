@@ -65,7 +65,7 @@ async function requestPasswordReset(emailInput, originHeader) {
     }
   }
 
-  const resetLink = `${clientOrigin}/login?view=reset&token=${encodeURIComponent(resetToken)}&email=${encodeURIComponent(targetEmail)}`;
+  const resetLink = `${clientOrigin}/#/login?view=reset&token=${encodeURIComponent(resetToken)}&email=${encodeURIComponent(targetEmail)}`;
 
   let mailResult = { liveEmailSent: false };
   try {

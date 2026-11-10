@@ -752,10 +752,17 @@ export class LoginComponent implements OnInit, AfterViewInit {
   showConfirmPassword = signal<boolean>(false);
 
   ngOnInit() {
-    // Listen for query parameters from email link: /login?view=reset&token=...&email=...
+    // Listen for query parameters from email link: /#/login?view=reset&token=...&email=...
     this.route.queryParams.subscribe(params => {
-      const token = params['token'];
-      const email = params['email'];
+      let token = params['token'];
+      let email = params['email'];
+
+      // Bulletproof fallback: check window.location.search if not in router params
+      if (!token && typeof window !== 'undefined' && window.location) {
+        const urlParams = new URLSearchParams(window.location.search);
+        token = urlParams.get('token') || undefined;
+        email = urlParams.get('email') || undefined;
+      }
 
       // ONLY open reset view if a token is present from clicking the email link
       if (token) {
