@@ -30,7 +30,6 @@ function getBackendUrl(path: string): string {
       <!-- Top Bar: Welcome User & Logout -->
       <header class="top-header">
         <div class="user-greeting-wrapper">
-          <img src="icon.png" alt="Ysquare" class="dashboard-brand-icon" />
           <h1 class="welcome-title">
             Welcome, <span class="user-highlight">{{ authService.currentUser()?.name }}</span>
           </h1>
@@ -486,14 +485,6 @@ function getBackendUrl(path: string): string {
       align-items: center;
       gap: 12px;
       flex-wrap: wrap;
-    }
-
-    .dashboard-brand-icon {
-      width: 38px;
-      height: 38px;
-      border-radius: 8px;
-      object-fit: contain;
-      box-shadow: 0 2px 8px rgba(241, 90, 36, 0.15);
     }
 
     .user-email-pill {
