@@ -6,7 +6,26 @@ const dataStore = require('../../dataStore');
 const driveConfig = require('../../config/drive.config');
 const { renderDocumentPage } = require('../../services/viewer/viewer.template');
 const { convertDocxBufferToHtml, convertDocxFileToHtml } = require('../../services/viewer/docx.service');
-const { getMimeTypeByExtension } = require('../../common/utils');
+
+function getMimeTypeByExtension(ext) {
+  const mimeMap = {
+    '.pdf': 'application/pdf',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.svg': 'image/svg+xml',
+    '.txt': 'text/plain; charset=utf-8',
+    '.html': 'text/html; charset=utf-8',
+    '.mp4': 'video/mp4',
+    '.webm': 'video/webm',
+    '.mov': 'video/quicktime',
+    '.doc': 'application/msword',
+    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  };
+  return mimeMap[(ext || '').toLowerCase()] || 'application/octet-stream';
+}
 
 function getStatus(req, res) {
   return res.json(driveModuleService.getStatus());

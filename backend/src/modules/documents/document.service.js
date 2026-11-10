@@ -1,8 +1,28 @@
+const path = require('path');
 const dataStore = require('../../dataStore');
 const driveService = require('../../services/drive/drive.service');
 const studentRepo = require('../students/student.repository');
-const { generateFilenameFromDocType } = require('../../common/utils');
 const db = require('../../config/database');
+
+function generateFilenameFromDocType(documentType, originalname) {
+  const extension = path.extname(originalname || '') || '';
+  if (!documentType || typeof documentType !== 'string' || !documentType.trim()) {
+    return originalname || `Document${extension}`;
+  }
+
+  let cleanType = documentType.trim()
+    .replace(/[\/\\:*?"<>|]/g, '')
+    .replace(/\s+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^[._-]+|[._-]+$/g, '');
+
+  if (!cleanType) {
+    cleanType = 'Document';
+  }
+
+  const cleanExt = extension.startsWith('.') ? extension : (extension ? `.${extension}` : '');
+  return `${cleanType}${cleanExt}`;
+}
 
 async function ensureUserDriveFolder(user) {
   if (!user || user.role === 'admin') {

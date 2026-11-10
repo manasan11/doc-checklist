@@ -6,7 +6,6 @@ const driveConfig = require('../../config/drive.config');
 const { ensureUserDriveFolder } = require('../documents/document.service');
 const { convertDocxBufferToHtml, convertDocxFileToHtml } = require('../../services/viewer/docx.service');
 const { renderDocumentPage } = require('../../services/viewer/viewer.template');
-const { getMimeTypeByExtension } = require('../../common/utils');
 
 function getStatus() {
   return driveService.getDriveStatus();
