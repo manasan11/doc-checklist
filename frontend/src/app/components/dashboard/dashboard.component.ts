@@ -30,7 +30,7 @@ function getBackendUrl(path: string): string {
       <!-- Top Bar: Logo, Welcome User & Logout -->
       <header class="top-header">
         <div class="header-brand-greeting">
-          <img src="logo.jpg" alt="Ysquare" class="dashboard-logo" />
+          <img src="favicon.png" alt="Ysquare" class="dashboard-logo" />
           <div class="header-divider"></div>
           <div class="user-greeting-wrapper">
             <h1 class="welcome-title">
@@ -494,8 +494,9 @@ function getBackendUrl(path: string): string {
     }
 
     .dashboard-logo {
+      width: 38px;
       height: 38px;
-      width: auto;
+      border-radius: 8px;
       object-fit: contain;
     }
 
