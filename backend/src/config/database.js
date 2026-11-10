@@ -57,8 +57,8 @@ async function findUserByIdentifier(identifier) {
       query = 'SELECT * FROM student WHERE LOWER(TRIM(Email)) = LOWER(TRIM(?)) AND (DeleteStatus = 0 OR DeleteStatus IS NULL) LIMIT 1';
       params = [clean];
     } else {
-      query = 'SELECT * FROM student WHERE (Username = ? OR Student_Id = ? OR Unique_Id = ?';
-      params = [clean, clean, clean];
+      query = 'SELECT * FROM student WHERE (Username = ? OR Student_Name = ? OR Student_Id = ? OR Unique_Id = ?';
+      params = [clean, clean, clean, clean];
       if (numPart && numPart !== clean) {
         query += ' OR Student_Id = ? OR Unique_Id = ?';
         params.push(numPart, numPart);
