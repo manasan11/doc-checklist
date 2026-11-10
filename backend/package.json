@@ -5,9 +5,9 @@
   "main": "server.js",
   "scripts": {
     "prestart": "node ../cleanup-ports.js",
-    "start": "node --watch-path=server.js --watch-path=driveService.js --watch-path=dataStore.js --watch-path=db.js --watch-path=.env server.js",
+    "start": "node --watch-path=. server.js",
     "predev": "node ../cleanup-ports.js",
-    "dev": "node --watch-path=server.js --watch-path=driveService.js --watch-path=dataStore.js --watch-path=db.js --watch-path=.env server.js",
+    "dev": "node --watch-path=. server.js",
     "test:drive": "node test-drive.js",
     "connect-drive": "node setup-oauth.js"
   },
