@@ -15,7 +15,7 @@ import { NotificationService } from '../../services/notification.service';
         <!-- Brand Header with Official Logo -->
         <div class="card-header">
           <div class="brand-logo-wrapper">
-            <img src="ysquare-logo.jpg" alt="Ysquare - Achieve Your Global Dreams" class="brand-logo" />
+            <img src="logo.jpg" alt="Ysquare - Achieve Your Global Dreams" class="brand-logo" />
           </div>
           <h1 class="card-title">
             @if (currentView() === 'login') {
