@@ -31,7 +31,6 @@ function getBackendUrl(path: string): string {
       <header class="top-header">
         <div class="header-brand-greeting">
           <img src="favicon.png" alt="Ysquare" class="dashboard-logo" />
-          <div class="header-divider"></div>
           <div class="user-greeting-wrapper">
             <h1 class="welcome-title">
               Welcome, <span class="user-highlight">{{ authService.currentUser()?.name }}</span>
@@ -489,7 +488,7 @@ function getBackendUrl(path: string): string {
     .header-brand-greeting {
       display: flex;
       align-items: center;
-      gap: 18px;
+      gap: 12px;
       flex-wrap: wrap;
     }
 
@@ -498,12 +497,6 @@ function getBackendUrl(path: string): string {
       height: 38px;
       border-radius: 8px;
       object-fit: contain;
-    }
-
-    .header-divider {
-      width: 1px;
-      height: 30px;
-      background: #EAE3D8;
     }
 
     .user-greeting-wrapper {
