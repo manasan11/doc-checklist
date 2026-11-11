@@ -360,13 +360,17 @@ async function syncSingleUploadToMysql(userId, doc, fileResult, userNotes = "") 
         } catch (_) {}
       }
 
+      const fileName = fileResult?.fileName || doc?.fileName || doc?.name || 'Document';
+      const docName = doc?.name || fileName;
       const insertResult = await db.insertStudentDocument(
         studentCode,
+        fileName,
         doc.id,
+        docName,
         directDriveLink,
-        fileResult.fileName,
         userNotes,
-        assignedStaff
+        assignedStaff,
+        0
       );
       return insertResult ? insertResult.insertId : null;
     }
@@ -383,8 +387,8 @@ async function saveDocumentUpload(userId, docId, fileResult, userNotes = "", doc
   }
   if (!user) throw new Error("User not found");
 
-  if (!user.documents) {
-    user.documents = [];
+  if (!user.documents || user.documents.length === 0) {
+    await getOrLoadUserDocuments(userId);
   }
 
   let docIndex = -1;
@@ -500,7 +504,9 @@ async function saveDocumentUpload(userId, docId, fileResult, userNotes = "", doc
   if (newStudentDocId && finalDoc && finalDoc.versions && finalDoc.versions.length > 0) {
     finalDoc.versions[finalDoc.versions.length - 1].studentDocumentId = newStudentDocId;
   }
-  return finalDoc;
+  // Refresh checklist from MySQL so that in-memory cache and UI state are 100% synchronized
+  await getOrLoadUserDocuments(userId);
+  return getDocumentById(userId, targetDocId) || finalDoc;
 }
 
 function updateDocumentMetadata(userId, docId, updates) {
@@ -1037,13 +1043,15 @@ async function processDocumentUpload({ rawDocId, targetUserId, userNotes, reques
 
   const originalDocFilename = generateFilenameFromDocType(effectiveDocType, file.originalname);
 
-  const driveResult = await driveService.uploadFile(
-    file,
+  const driveResult = await driveService.uploadFile({
+    originalname: file.originalname,
+    mimetype: file.mimetype,
+    buffer: file.buffer,
+    size: file.size,
+    folderId: folderIdToUse,
     studentFolderName,
-    originalDocFilename,
-    userNotes,
-    folderIdToUse
-  );
+    targetFileName: originalDocFilename
+  });
 
   if (driveResult && driveResult.folderId) {
     user.driveFolderId = driveResult.folderId;

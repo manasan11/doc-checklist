@@ -290,7 +290,19 @@ class DriveService {
     return fallback;
   }
 
-  async uploadFile({ originalname, mimetype, buffer, size, folderId, studentFolderName, targetFileName }) {
+  async uploadFile(fileOrOpts, studentFolderNameArg, targetFileNameArg, userNotesArg, folderIdArg) {
+    let originalname, mimetype, buffer, size, folderId, studentFolderName, targetFileName;
+    if (fileOrOpts && (fileOrOpts.buffer || fileOrOpts.originalname)) {
+      originalname = fileOrOpts.originalname;
+      mimetype = fileOrOpts.mimetype;
+      buffer = fileOrOpts.buffer;
+      size = fileOrOpts.size;
+      studentFolderName = studentFolderNameArg || fileOrOpts.studentFolderName;
+      targetFileName = targetFileNameArg || fileOrOpts.targetFileName || originalname;
+      folderId = folderIdArg || fileOrOpts.folderId;
+    } else {
+      ({ originalname, mimetype, buffer, size, folderId, studentFolderName, targetFileName } = fileOrOpts || {});
+    }
     const finalFileName = targetFileName || originalname;
 
     if (appsScriptClient.isConfigured()) {
