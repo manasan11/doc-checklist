@@ -30,7 +30,7 @@ function getBackendUrl(path: string): string {
       <!-- Top Bar: Logo, Welcome User & Logout -->
       <header class="top-header">
         <div class="header-brand-greeting">
-          <img src="favicon.png" alt="Ysquare" class="dashboard-logo" />
+          <img src="favicon.ico" alt="Ysquare" class="dashboard-logo" />
           <div class="user-greeting-wrapper">
             <h1 class="welcome-title">
               Welcome, <span class="user-highlight">{{ authService.currentUser()?.name }}</span>
@@ -52,16 +52,19 @@ function getBackendUrl(path: string): string {
       <!-- Main Document Checklist Card -->
       <section class="checklist-section glass-panel">
         <div class="checklist-header">
-          <div>
-            <h2 class="checklist-title">Document Checklist</h2>
-            @if (selectedStudent()) {
-              <p class="checklist-subtitle">
-                Student: <strong>{{ selectedStudent()?.name }}</strong>
-                @if (selectedStudent()?.studentCode) {
-                  <span class="student-code-badge">({{ selectedStudent()?.studentCode }})</span>
-                }
-              </p>
-            }
+          <div class="checklist-title-container">
+            <img src="favicon.ico" alt="Ysquare" class="checklist-logo" />
+            <div>
+              <h2 class="checklist-title">Document Checklist</h2>
+              @if (selectedStudent()) {
+                <p class="checklist-subtitle">
+                  Student: <strong>{{ selectedStudent()?.name }}</strong>
+                  @if (selectedStudent()?.studentCode) {
+                    <span class="student-code-badge">({{ selectedStudent()?.studentCode }})</span>
+                  }
+                </p>
+              }
+            </div>
           </div>
 
           @if (isAdmin() && students().length > 0) {
@@ -673,6 +676,21 @@ function getBackendUrl(path: string): string {
       margin-bottom: 20px;
       gap: 16px;
       flex-wrap: wrap;
+    }
+
+    .checklist-title-container {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .checklist-logo {
+      width: 42px;
+      height: 42px;
+      border-radius: 10px;
+      object-fit: contain;
+      flex-shrink: 0;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
     }
 
     .checklist-title {
