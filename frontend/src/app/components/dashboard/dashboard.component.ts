@@ -1,12 +1,10 @@
-import { Component, inject, signal, computed, OnInit, HostListener } from '@angular/core';
+import { Component, inject, signal, computed, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { UploadModalComponent } from '../upload-modal/upload-modal.component';
 import { DocumentService } from '../../services/document.service';
 import { AuthService } from '../../services/auth.service';
 import { NotificationService } from '../../services/notification.service';
-import { UserNotificationService } from '../../services/user-notification.service';
-import { UserNotification } from '../../models/user-notification.model';
 import { DocumentItem, DocumentVersion, ChecklistResponse } from '../../models/document.model';
 import { StudentUser } from '../../models/user.model';
 import { environment } from '../../../environments/environment';
@@ -40,75 +38,6 @@ function getBackendUrl(path: string): string {
           </div>
         </div>
         <div class="header-actions">
-          <!-- Notification Bell Dropdown -->
-          <div class="notif-bell-wrapper">
-            <button 
-              class="btn-notif-bell" 
-              (click)="notifService.toggleDropdown()" 
-              [class.has-unread]="notifService.unreadCount() > 0"
-              title="Notifications"
-              aria-label="Notifications">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
-                <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
-              </svg>
-              @if (notifService.unreadCount() > 0) {
-                <span class="notif-badge">{{ notifService.unreadCount() > 99 ? '99+' : notifService.unreadCount() }}</span>
-              }
-            </button>
-
-            @if (notifService.isOpen()) {
-              <div class="notif-dropdown" (click)="$event.stopPropagation()">
-                <div class="notif-header">
-                  <div class="notif-title-row">
-                    <h3 class="notif-title">Notifications</h3>
-                    @if (notifService.unreadCount() > 0) {
-                      <span class="notif-unread-pill">{{ notifService.unreadCount() }} new</span>
-                    }
-                  </div>
-                  @if (notifService.unreadCount() > 0) {
-                    <button class="btn-mark-all" (click)="notifService.markAllAsRead()">Mark all read</button>
-                  }
-                </div>
-
-                <div class="notif-list">
-                  @if (notifService.isLoading()) {
-                    <div class="notif-loading">Loading notifications...</div>
-                  } @else if (notifService.notifications().length === 0) {
-                    <div class="notif-empty">
-                      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#D1D5DB" stroke-width="1.8">
-                        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
-                        <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
-                      </svg>
-                      <p>No notifications yet</p>
-                    </div>
-                  } @else {
-                    @for (n of notifService.notifications(); track n.id) {
-                      <div 
-                        class="notif-item" 
-                        [class.unread]="!n.isRead"
-                        (click)="onNotificationClick(n)">
-                        <div class="notif-item-header">
-                          <div class="notif-student-info">
-                            <span class="notif-student-name">{{ n.studentName || 'Student' }}</span>
-                            @if (n.studentId) {
-                              <span class="notif-student-id">ID: {{ n.studentId }}</span>
-                            }
-                          </div>
-                          @if (!n.isRead) {
-                            <span class="notif-unread-dot" title="Unread"></span>
-                          }
-                        </div>
-                        <p class="notif-message">{{ n.remark || n.description }}</p>
-                        <div class="notif-time">{{ formatNotifTime(n.entryDate) }}</div>
-                      </div>
-                    }
-                  }
-                </div>
-              </div>
-            }
-          </div>
-
           <button class="btn-reset-password" (click)="openResetPasswordModal()" title="Reset account password">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
               <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
@@ -606,222 +535,6 @@ function getBackendUrl(path: string): string {
       display: flex;
       align-items: center;
       gap: 10px;
-    }
-
-    /* Notification Bell & Dropdown Styles */
-    .notif-bell-wrapper {
-      position: relative;
-      display: inline-flex;
-    }
-
-    .btn-notif-bell {
-      position: relative;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      width: 38px;
-      height: 38px;
-      background: #FAF7F2;
-      border: 1px solid #E5DED3;
-      border-radius: var(--radius-md);
-      color: #57534E;
-      cursor: pointer;
-      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-    }
-
-    .btn-notif-bell:hover {
-      background: #FFF7ED;
-      border-color: #FDBA74;
-      color: #EA580C;
-      transform: translateY(-1px);
-    }
-
-    .btn-notif-bell.has-unread {
-      color: #EA580C;
-    }
-
-    .notif-badge {
-      position: absolute;
-      top: -4px;
-      right: -4px;
-      min-width: 18px;
-      height: 18px;
-      padding: 0 4px;
-      border-radius: 999px;
-      background: #EF4444;
-      color: #FFFFFF;
-      font-size: 0.65rem;
-      font-weight: 700;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border: 2px solid #FFFFFF;
-      box-shadow: 0 2px 5px rgba(239, 68, 68, 0.35);
-      animation: notifPulse 2s infinite;
-    }
-
-    @keyframes notifPulse {
-      0%, 100% { transform: scale(1); }
-      50% { transform: scale(1.08); }
-    }
-
-    .notif-dropdown {
-      position: absolute;
-      top: calc(100% + 8px);
-      right: 0;
-      width: 380px;
-      max-width: 90vw;
-      background: #FFFFFF;
-      border: 1px solid #EAE3D8;
-      border-radius: var(--radius-lg);
-      box-shadow: 0 14px 35px -4px rgba(40, 20, 10, 0.12), 0 4px 10px rgba(0, 0, 0, 0.04);
-      z-index: 1000;
-      overflow: hidden;
-      animation: notifFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-    }
-
-    @keyframes notifFadeIn {
-      from { opacity: 0; transform: translateY(-6px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    .notif-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 12px 16px;
-      background: #FAF7F2;
-      border-bottom: 1px solid #F0EAE0;
-    }
-
-    .notif-title-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .notif-title {
-      font-size: 0.92rem;
-      font-weight: 700;
-      color: #1C1917;
-      margin: 0;
-      font-family: var(--font-heading);
-    }
-
-    .notif-unread-pill {
-      background: #FEF2F2;
-      color: #DC2626;
-      border: 1px solid #FECACA;
-      padding: 1px 7px;
-      border-radius: 999px;
-      font-size: 0.7rem;
-      font-weight: 700;
-    }
-
-    .btn-mark-all {
-      background: none;
-      border: none;
-      font-size: 0.78rem;
-      font-weight: 600;
-      color: #EA580C;
-      cursor: pointer;
-      padding: 2px 4px;
-      border-radius: 4px;
-      transition: color 0.15s;
-    }
-
-    .btn-mark-all:hover {
-      color: #C2410C;
-      text-decoration: underline;
-    }
-
-    .notif-list {
-      max-height: 380px;
-      overflow-y: auto;
-      overscroll-behavior: contain;
-    }
-
-    .notif-item {
-      padding: 12px 16px;
-      border-bottom: 1px solid #F5F1EA;
-      cursor: pointer;
-      transition: background 0.15s;
-      display: flex;
-      flex-direction: column;
-      gap: 5px;
-    }
-
-    .notif-item:last-child {
-      border-bottom: none;
-    }
-
-    .notif-item:hover {
-      background: #FAF7F2;
-    }
-
-    .notif-item.unread {
-      background: #FFFDF9;
-      border-left: 3px solid #F15A24;
-    }
-
-    .notif-item-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-    }
-
-    .notif-student-info {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-
-    .notif-student-name {
-      font-size: 0.86rem;
-      font-weight: 700;
-      color: #1C1917;
-    }
-
-    .notif-student-id {
-      background: #F3F4F6;
-      color: #4B5563;
-      font-size: 0.7rem;
-      font-weight: 600;
-      padding: 1px 6px;
-      border-radius: 4px;
-    }
-
-    .notif-unread-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #F15A24;
-      flex-shrink: 0;
-    }
-
-    .notif-message {
-      font-size: 0.8rem;
-      color: #57534E;
-      line-height: 1.4;
-      margin: 0;
-      word-break: break-word;
-    }
-
-    .notif-time {
-      font-size: 0.72rem;
-      color: #A8A29E;
-    }
-
-    .notif-empty, .notif-loading {
-      padding: 36px 16px;
-      text-align: center;
-      color: #A8A29E;
-      font-size: 0.86rem;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 8px;
     }
 
     .btn-reset-password {
@@ -1337,7 +1050,6 @@ export class DashboardComponent implements OnInit {
   docService = inject(DocumentService);
   authService = inject(AuthService);
   notificationService = inject(NotificationService);
-  notifService = inject(UserNotificationService);
 
   documents = signal<DocumentItem[]>([]);
   students = signal<StudentUser[]>([]);
@@ -1361,7 +1073,6 @@ export class DashboardComponent implements OnInit {
   uploadingInProgress = signal<boolean>(false);
 
   ngOnInit() {
-    this.notifService.refresh();
     if (this.isAdmin()) {
       this.loadStudentsAndChecklist();
     } else {
@@ -1376,52 +1087,6 @@ export class DashboardComponent implements OnInit {
         });
       }
       this.loadDocuments();
-    }
-  }
-
-  @HostListener('document:click', ['$event'])
-  onDocumentClick(event: MouseEvent) {
-    const target = event.target as HTMLElement;
-    if (!target.closest('.notif-bell-wrapper')) {
-      this.notifService.closeDropdown();
-    }
-  }
-
-  onNotificationClick(n: UserNotification) {
-    if (!n.isRead) {
-      this.notifService.markAsRead(n.id).subscribe();
-    }
-    if (n.studentId && (this.isAdmin() || this.authService.isStaff())) {
-      const cleanTargetId = String(n.studentId).replace(/\D/g, '');
-      const targetStudent = this.students().find(s => {
-        const sCode = String(s.studentCode || s.id).replace(/\D/g, '');
-        return sCode === cleanTargetId;
-      });
-      if (targetStudent) {
-        this.selectedStudent.set(targetStudent);
-        this.loadDocuments(targetStudent.id);
-      }
-    }
-    this.notifService.closeDropdown();
-  }
-
-  formatNotifTime(dateStr?: string): string {
-    if (!dateStr) return '';
-    try {
-      const d = new Date(dateStr);
-      if (isNaN(d.getTime())) return dateStr;
-      const now = new Date();
-      const diffMs = now.getTime() - d.getTime();
-      const diffMins = Math.floor(diffMs / 60000);
-      if (diffMins < 1) return 'Just now';
-      if (diffMins < 60) return `${diffMins}m ago`;
-      const diffHours = Math.floor(diffMins / 60);
-      if (diffHours < 24) return `${diffHours}h ago`;
-      const diffDays = Math.floor(diffHours / 24);
-      if (diffDays < 7) return `${diffDays}d ago`;
-      return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-    } catch (_) {
-      return dateStr;
     }
   }
 
