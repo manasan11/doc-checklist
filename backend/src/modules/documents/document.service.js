@@ -198,23 +198,22 @@ function populateDocWithRecords(docItem, activeRecords) {
     };
   });
 
-  const firstActive = versions[0];
   const latestActive = versions[versions.length - 1];
 
   docItem.uploadStatus = "Uploaded";
-  docItem.approvalStatus = firstActive.approvalStatus;
-  docItem.verificationStatus = firstActive.verificationStatus;
-  docItem.isLocked = (firstActive.verificationStatus === 1);
+  docItem.approvalStatus = latestActive.approvalStatus;
+  docItem.verificationStatus = latestActive.verificationStatus;
+  docItem.isLocked = (latestActive.verificationStatus === 1);
   docItem.currentVersion = versions.length;
-  docItem.uploadDateTime = firstActive.uploadDateTime;
-  docItem.driveFileId = firstActive.driveFileId;
-  docItem.fileName = firstActive.fileName;
-  docItem.webViewLink = firstActive.webViewLink;
-  docItem.downloadUrl = firstActive.downloadUrl;
-  docItem.notes = firstActive.notes;
-  docItem.rejectionReason = firstActive.rejectionReason;
-  docItem.adminFeedback = firstActive.verificationStatus === 2 
-    ? (firstActive.rejectionReason || docItem.adminFeedback || '') 
+  docItem.uploadDateTime = latestActive.uploadDateTime;
+  docItem.driveFileId = latestActive.driveFileId;
+  docItem.fileName = latestActive.fileName;
+  docItem.webViewLink = latestActive.webViewLink;
+  docItem.downloadUrl = latestActive.downloadUrl;
+  docItem.notes = latestActive.notes;
+  docItem.rejectionReason = latestActive.rejectionReason;
+  docItem.adminFeedback = latestActive.verificationStatus === 2 
+    ? (latestActive.rejectionReason || docItem.adminFeedback || '') 
     : (docItem.adminFeedback || '');
   docItem.versions = versions;
   docItem.assignedStaff = latestActive?.assignedStaff || docItem.assignedStaff || null;
