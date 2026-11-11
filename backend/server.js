@@ -4,7 +4,8 @@ require('dotenv').config({ path: path.resolve(__dirname, '.env'), override: true
 const config = require('./src/config');
 const app = require('./src/app');
 const { initDatabase } = require('./src/config/database');
-const dataStore = require('./src/dataStore');
+const studentService = require('./src/modules/students/student.service');
+const documentService = require('./src/modules/documents/document.service');
 const { execSync } = require('child_process');
 
 process.on('uncaughtException', (err) => {
@@ -64,9 +65,12 @@ function listenOnPort(port, retries = 3) {
 async function startServer() {
   try {
     await initDatabase();
-    // Warm up template and student list in background without blocking server startup
-    dataStore.loadFromMysql().catch(err => {
-      console.warn('[DataStore Preload Notice]:', err.message);
+    // Warm up master document templates and student list in background without blocking server startup
+    Promise.all([
+      documentService.getMasterDocTemplates(),
+      studentService.getAllStudents()
+    ]).catch(err => {
+      console.warn('[Preload Notice]:', err.message);
     });
   } catch (err) {
     console.warn('[MySQL Warning]:', err.message);

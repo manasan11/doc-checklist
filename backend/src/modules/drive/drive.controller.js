@@ -2,7 +2,7 @@ const path = require('path');
 const fs = require('fs');
 const driveModuleService = require('./drive.service');
 const driveService = require('../../services/drive.service');
-const dataStore = require('../../dataStore');
+const documentService = require('../documents/document.service');
 const driveConfig = require('../../config/drive.config');
 const { renderDocumentPage, convertDocxBufferToHtml, convertDocxFileToHtml } = require('../../services/docx.service');
 
@@ -122,25 +122,11 @@ async function viewFile(req, res) {
   let mimeType = 'application/octet-stream';
   let originalName = 'document';
 
-  for (const user of dataStore.data.users) {
-    for (const doc of user.documents) {
-      if (doc.driveFileId === fileId) {
-        foundSavedFileName = doc.savedFileName;
-        mimeType = doc.mimeType || mimeType;
-        originalName = doc.fileName || originalName;
-        break;
-      }
-      if (doc.versions) {
-        const match = doc.versions.find(v => v.driveFileId === fileId);
-        if (match) {
-          foundSavedFileName = match.savedFileName;
-          mimeType = match.mimeType || mimeType;
-          originalName = match.fileName || originalName;
-          break;
-        }
-      }
-    }
-    if (foundSavedFileName) break;
+  const foundDoc = documentService.findDocumentByDriveFileId(fileId);
+  if (foundDoc) {
+    foundSavedFileName = foundDoc.foundSavedFileName;
+    mimeType = foundDoc.mimeType || mimeType;
+    originalName = foundDoc.originalName || originalName;
   }
 
   if (!foundSavedFileName && fs.existsSync(driveConfig.uploadsDir)) {
@@ -198,23 +184,10 @@ async function downloadFile(req, res) {
   let foundSavedFileName = null;
   let originalName = 'downloaded_document';
 
-  for (const user of dataStore.data.users) {
-    for (const doc of user.documents) {
-      if (doc.driveFileId === fileId) {
-        foundSavedFileName = doc.savedFileName;
-        originalName = doc.fileName || originalName;
-        break;
-      }
-      if (doc.versions) {
-        const match = doc.versions.find(v => v.driveFileId === fileId);
-        if (match) {
-          foundSavedFileName = match.savedFileName;
-          originalName = match.fileName || originalName;
-          break;
-        }
-      }
-    }
-    if (foundSavedFileName) break;
+  const foundDoc = documentService.findDocumentByDriveFileId(fileId);
+  if (foundDoc) {
+    foundSavedFileName = foundDoc.foundSavedFileName;
+    originalName = foundDoc.originalName || originalName;
   }
 
   if (!foundSavedFileName && fs.existsSync(driveConfig.uploadsDir)) {

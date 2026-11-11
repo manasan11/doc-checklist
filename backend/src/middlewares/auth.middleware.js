@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 const config = require('../config');
-const dataStore = require('../dataStore');
+const authService = require('../modules/auth/auth.service');
 
 function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
@@ -13,9 +13,9 @@ function authenticateToken(req, res, next) {
     try {
       const decoded = jwt.verify(token, config.jwtSecret);
       if (decoded) {
-        let user = decoded.id ? dataStore.findUserById(decoded.id) : null;
+        let user = decoded.id ? authService.findUserById(decoded.id) : null;
         if (!user && decoded.email) {
-          user = dataStore.findUserByEmailOrUsername(decoded.email);
+          user = authService.findUserByEmailOrUsername(decoded.email);
         }
         if (user) {
           req.user = { id: user.id, email: user.email, name: user.name, role: user.role };
@@ -35,11 +35,11 @@ function authenticateToken(req, res, next) {
   // 2. Resolve user by header ID or Email
   let user = null;
   if (headerUserId) {
-    user = dataStore.findUserById(headerUserId);
+    user = authService.findUserById(headerUserId);
   }
   if (!user && (headerUserEmail || headerUserId)) {
     const identifier = headerUserEmail || headerUserId;
-    user = dataStore.findUserByEmailOrUsername(identifier);
+    user = authService.findUserByEmailOrUsername(identifier);
   }
 
   if (user) {

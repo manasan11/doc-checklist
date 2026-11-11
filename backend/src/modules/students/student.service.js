@@ -1,8 +1,47 @@
-const dataStore = require('../../dataStore');
 const db = require('../../config/database');
 
+let cachedStudentList = null;
+
 async function getAllStudents() {
-  return await dataStore.getStudentList();
+  if (cachedStudentList && cachedStudentList.length > 0) {
+    return cachedStudentList;
+  }
+  try {
+    const students = await db.loadActiveStudents();
+    cachedStudentList = (students || []).map(s => {
+      const studentCode = String(s.Student_Id || s.Unique_Id || '').trim();
+      return {
+        id: `u-${studentCode}`,
+        studentCode: studentCode,
+        name: s.Student_Name || s.name || `Student ${studentCode}`,
+        email: s.Email || s.email || '',
+        username: s.Email || s.email || `student_${studentCode}`,
+        role: 'user',
+        department: s.Department_Name || s.department || 'General Operations',
+        assignedStaff: s.Assigned_Staff || null,
+        staffName: s.Staff_Name || null,
+        staffEmail: s.Staff_Email || null,
+        documents: []
+      };
+    });
+    return cachedStudentList;
+  } catch (err) {
+    console.warn('[StudentService] Notice loading student list from MySQL:', err.message);
+    return [];
+  }
+}
+
+function updateStudentInCache(studentId, updates = {}) {
+  const cleanId = String(studentId).replace(/^u-/, '').trim().toLowerCase();
+  if (cachedStudentList && Array.isArray(cachedStudentList)) {
+    const idx = cachedStudentList.findIndex(s => {
+      const code = String(s.studentCode || s.id || '').replace(/^u-/, '').trim().toLowerCase();
+      return code === cleanId;
+    });
+    if (idx !== -1) {
+      cachedStudentList[idx] = { ...cachedStudentList[idx], ...updates };
+    }
+  }
 }
 
 async function updateStudent(studentId, details) {
@@ -15,7 +54,7 @@ async function updateStudent(studentId, details) {
   if (details.username !== undefined) updates.username = details.username;
   if (details.department !== undefined) updates.department = details.department;
 
-  dataStore.updateStudentInCache(cleanId, updates);
+  updateStudentInCache(cleanId, updates);
 
   return {
     studentId: cleanId,
@@ -26,6 +65,7 @@ async function updateStudent(studentId, details) {
 
 module.exports = {
   getAllStudents,
-  updateStudent
+  getStudentList: getAllStudents,
+  updateStudent,
+  updateStudentInCache
 };
-

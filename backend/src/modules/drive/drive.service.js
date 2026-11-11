@@ -1,9 +1,10 @@
 const path = require('path');
 const fs = require('fs');
 const driveService = require('../../services/drive.service');
-const dataStore = require('../../dataStore');
 const driveConfig = require('../../config/drive.config');
-const { ensureUserDriveFolder } = require('../documents/document.service');
+const documentService = require('../documents/document.service');
+const authService = require('../auth/auth.service');
+const studentService = require('../students/student.service');
 const { convertDocxBufferToHtml, convertDocxFileToHtml, renderDocumentPage } = require('../../services/docx.service');
 
 function getStatus() {
@@ -16,7 +17,7 @@ async function listFiles(folderId) {
 
 async function syncFiles(targetUserId) {
   const driveList = await driveService.listFiles();
-  const syncResult = dataStore.syncGoogleDriveFiles(targetUserId, driveList.files || []);
+  const syncResult = documentService.syncGoogleDriveFiles(targetUserId, driveList.files || []);
   return {
     syncResult,
     driveList
@@ -24,29 +25,29 @@ async function syncFiles(targetUserId) {
 }
 
 async function syncAllStudentFolders() {
-  const users = dataStore.data.users || [];
+  const allStudents = await studentService.getAllStudents();
   let count = 0;
-  for (const u of users) {
-    if (u.role === 'admin') continue;
+  for (const s of allStudents) {
     try {
-      await ensureUserDriveFolder(u);
-      count++;
+      const u = authService.findUserById(s.id) || await authService.findOrLoadUser(s.id);
+      if (u) {
+        await documentService.ensureUserDriveFolder(u);
+        count++;
+      }
     } catch (e) {
-      console.warn(`[Google Drive] Could not verify folder for ${u.name}:`, e.message);
+      console.warn(`[Google Drive] Could not verify folder for ${s.name}:`, e.message);
     }
   }
 
-  const students = (dataStore.data.users || [])
-    .filter(u => u.role !== 'admin')
-    .map(u => ({
-      id: u.id,
-      name: u.name,
-      email: u.email,
-      studentCode: u.studentCode,
-      driveFolderId: u.driveFolderId,
-      driveFolderName: u.driveFolderName,
-      folderUrl: u.driveFolderId ? `https://drive.google.com/drive/folders/${u.driveFolderId}` : null
-    }));
+  const students = allStudents.map(u => ({
+    id: u.id,
+    name: u.name,
+    email: u.email,
+    studentCode: u.studentCode,
+    driveFolderId: u.driveFolderId || null,
+    driveFolderName: u.driveFolderName || null,
+    folderUrl: u.driveFolderId ? `https://drive.google.com/drive/folders/${u.driveFolderId}` : null
+  }));
 
   return {
     count,
@@ -60,4 +61,3 @@ module.exports = {
   syncFiles,
   syncAllStudentFolders
 };
-
