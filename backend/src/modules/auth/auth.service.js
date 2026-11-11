@@ -112,7 +112,7 @@ async function authenticateUser(identifier, password) {
     if (staffUser) {
       accountExists = true;
       const expectedPass = staffUser.password ? String(staffUser.password).trim() : null;
-      if (expectedPass && expectedPass === passTrim) {
+      if (expectedPass && (expectedPass === passTrim || expectedPass.toLowerCase() === passTrim.toLowerCase())) {
         let user = findUserById(staffUser.id);
         if (!user) {
           user = {
@@ -142,7 +142,7 @@ async function authenticateUser(identifier, password) {
     const envAdmin = process.env.ADMIN_USERNAME.trim().toLowerCase();
     if (cleanLower === envAdmin) {
       accountExists = true;
-      if (passTrim === process.env.ADMIN_PASSWORD.trim()) {
+      if (passTrim === process.env.ADMIN_PASSWORD.trim() || passTrim.toLowerCase() === process.env.ADMIN_PASSWORD.trim().toLowerCase()) {
         let user = findUserById('u-admin');
         if (!user) {
           user = {
@@ -168,7 +168,7 @@ async function authenticateUser(identifier, password) {
     if (stu) {
       accountExists = true;
       const expectedPass = stu.password ? String(stu.password).trim() : null;
-      if (expectedPass && expectedPass === passTrim) {
+      if (expectedPass && (expectedPass === passTrim || expectedPass.toLowerCase() === passTrim.toLowerCase())) {
         const user = await findOrLoadUser(stu.id);
         if (user) {
           user.password = expectedPass;
@@ -184,7 +184,7 @@ async function authenticateUser(identifier, password) {
   const user = findUserByEmailOrUsername(cleanLower);
   if (user) {
     accountExists = true;
-    if (user.password && String(user.password).trim() === passTrim) {
+    if (user.password && (String(user.password).trim() === passTrim || String(user.password).trim().toLowerCase() === passTrim.toLowerCase())) {
       return user;
     }
   }
