@@ -1,69 +1,180 @@
 const db = require('../../config/database');
 
-class NotificationService {
-  /**
-   * Automatically notifies the user assigned to a student when a document is uploaded.
-   * Finds the assigned user from `student_followup` (with fallback to `student` table),
-   * builds the notification with student details and document info, and writes to MySQL `notification`.
-   */
-  async notifyAssignedUserOnDocumentUpload({
-    studentId,
-    studentName = '',
-    docName = 'Document',
-    uploadDateTime = '',
-    userNotes = ''
-  }) {
-    if (!studentId) {
-      console.warn('[NotificationService] Missing studentId. Notification skipped.');
-      return null;
+async function getAssignedUserForStudent(studentIdentifier) {
+  if (!studentIdentifier) return null;
+  const clean = String(studentIdentifier).replace(/^u-/, '').trim();
+  const numId = /^\d+$/.test(clean) ? parseInt(clean, 10) : null;
+  let resolvedStudentId = numId;
+  let resolvedStudentName = '';
+
+  try {
+    const [stuRows] = await db.query(
+      'SELECT Student_Id, Student_Name, To_User_Id, To_User_Name FROM student WHERE (Student_Id = ? AND ? IS NOT NULL) OR Unique_Id = ? OR Email = ? LIMIT 1',
+      [numId, numId, clean, clean]
+    );
+
+    const stuRow = stuRows && stuRows.length > 0 ? stuRows[0] : null;
+    if (stuRow) {
+      resolvedStudentId = stuRow.Student_Id;
+      resolvedStudentName = stuRow.Student_Name || '';
     }
 
-    try {
-      const assignedUser = await db.getAssignedUserForStudent(studentId);
-      if (!assignedUser || !assignedUser.userId) {
-        console.warn(`[NotificationService] No assigned user found for student: ${studentId}. Notification skipped.`);
-        return null;
-      }
+    if (!resolvedStudentId) return null;
 
-      console.log(`[NotificationService] Found assigned user "${assignedUser.userName}" (ID: ${assignedUser.userId}) for student "${studentName || assignedUser.studentName}" (ID: ${studentId})`);
+    const [followRows] = await db.query(
+      'SELECT sf.Student_FollowUp_Id, sf.Student_Id, sf.User_Id, COALESCE(ud.User_Details_Name, sf.UserName) AS UserName, sf.Dept_Name FROM student_followup sf LEFT JOIN user_details ud ON sf.User_Id = ud.User_Details_Id WHERE sf.Student_Id = ? AND (sf.DeleteStatus = 0 OR sf.DeleteStatus IS NULL) AND sf.User_Id IS NOT NULL AND sf.User_Id > 0 ORDER BY sf.Student_FollowUp_Id DESC LIMIT 1',
+      [resolvedStudentId]
+    );
 
-      const notification = await db.createDocumentUploadNotification({
-        studentId,
-        studentName: studentName || assignedUser.studentName,
-        docName,
-        uploadDateTime,
-        assignedUser,
-        userNotes
-      });
-
-      return notification;
-    } catch (err) {
-      console.warn('[NotificationService] Error notifying assigned user:', err.message);
-      return null;
+    if (followRows && followRows.length > 0) {
+      return {
+        userId: followRows[0].User_Id,
+        userName: followRows[0].UserName || 'Staff',
+        deptName: followRows[0].Dept_Name || '',
+        studentId: resolvedStudentId,
+        studentName: resolvedStudentName
+      };
     }
+
+    if (stuRow && stuRow.To_User_Id && stuRow.To_User_Id > 0) {
+      return {
+        userId: stuRow.To_User_Id,
+        userName: stuRow.To_User_Name || 'Staff',
+        deptName: 'Assigned',
+        studentId: resolvedStudentId,
+        studentName: resolvedStudentName
+      };
+    }
+  } catch (err) {
+    console.warn('[NotificationService] getAssignedUserForStudent error:', err.message);
   }
 
-  /**
-   * Retrieves notifications for a given user.
-   */
-  async getUserNotifications(userId, options = {}) {
-    return db.getUserNotifications(userId, options);
-  }
+  return null;
+}
 
-  /**
-   * Marks a notification as read.
-   */
-  async markAsRead(notificationId, userId = null) {
-    return db.markNotificationRead(notificationId, userId);
-  }
+async function notifyAssignedUserOnDocumentUpload({
+  studentId,
+  studentName = '',
+  docName = 'Document',
+  uploadDateTime = '',
+  userNotes = ''
+}) {
+  if (!studentId) return null;
 
-  /**
-   * Marks all notifications for a user as read.
-   */
-  async markAllAsRead(userId) {
-    return db.markAllNotificationsRead(userId);
+  try {
+    const assigned = await getAssignedUserForStudent(studentId);
+    if (!assigned || !assigned.userId) return null;
+
+    const numStudentId = parseInt(String(studentId).replace(/\D/g, ''), 10) || assigned.studentId || 0;
+    const cleanStudentName = String(studentName || assigned.studentName || 'Student').trim().slice(0, 45);
+    const cleanAssignedName = String(assigned.userName || 'Staff').trim().slice(0, 45);
+    const timeStr = uploadDateTime || new Date().toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
+    const message = `A new document has been uploaded for student ${cleanStudentName} (ID: ${numStudentId}). Document: ${docName}. Uploaded on: ${timeStr}.${userNotes ? ` Notes: ${userNotes}` : ''}`;
+
+    const [res] = await db.query(
+      `INSERT INTO notification (
+        From_User, From_User_Name, To_User, To_User_Name, Status_Id, Status_Name,
+        View_Status, Remark, Entry_Date, Student_Id, Student_Name, DeleteStatus,
+        Read_Status, Entry_Type, Description
+      ) VALUES (?, ?, ?, ?, '0', 'Document Uploaded', 0, ?, NOW(), ?, ?, 0, 0, 4, 'Document Uploaded')`,
+      [numStudentId, cleanStudentName, assigned.userId, cleanAssignedName, message, numStudentId, cleanStudentName]
+    );
+
+    return {
+      notificationId: res.insertId,
+      toUserId: assigned.userId,
+      toUserName: cleanAssignedName,
+      studentId: numStudentId,
+      studentName: cleanStudentName,
+      docName,
+      message
+    };
+  } catch (err) {
+    console.warn('[NotificationService] notifyAssignedUserOnDocumentUpload error:', err.message);
+    return null;
   }
 }
 
-module.exports = new NotificationService();
+async function getUserNotifications(userId, { limit = 50, unreadOnly = false } = {}) {
+  const cleanId = parseInt(String(userId).replace(/\D/g, ''), 10);
+  if (!cleanId) return [];
 
+  try {
+    let query = `
+      SELECT 
+        Notification_Id AS id,
+        From_User AS fromUser,
+        From_User_Name AS fromUserName,
+        To_User AS toUser,
+        To_User_Name AS toUserName,
+        Status_Id AS statusId,
+        Status_Name AS statusName,
+        View_Status AS viewStatus,
+        Remark AS message,
+        Entry_Date AS createdAt,
+        Student_Id AS studentId,
+        Student_Name AS studentName,
+        Read_Status AS readStatus,
+        Entry_Type AS entryType,
+        Description AS description
+      FROM notification
+      WHERE To_User = ? AND (DeleteStatus = 0 OR DeleteStatus IS NULL)
+    `;
+    const params = [cleanId];
+    if (unreadOnly) {
+      query += ' AND (View_Status = 0 OR Read_Status = 0 OR View_Status IS NULL)';
+    }
+    query += ' ORDER BY Notification_Id DESC LIMIT ?';
+    params.push(Math.min(limit || 50, 100));
+
+    const [rows] = await db.query(query, params);
+    return rows || [];
+  } catch (err) {
+    console.warn('[NotificationService] getUserNotifications error:', err.message);
+    return [];
+  }
+}
+
+async function markAsRead(notificationId, userId = null) {
+  if (!notificationId) return false;
+  try {
+    let query = 'UPDATE notification SET View_Status = 1, Read_Status = 1 WHERE Notification_Id = ?';
+    const params = [notificationId];
+    if (userId) {
+      const cleanId = parseInt(String(userId).replace(/\D/g, ''), 10);
+      if (cleanId) {
+        query += ' AND To_User = ?';
+        params.push(cleanId);
+      }
+    }
+    const [res] = await db.query(query, params);
+    return Boolean(res && (res.affectedRows > 0 || res.changedRows > 0));
+  } catch (err) {
+    console.warn('[NotificationService] markAsRead error:', err.message);
+    return false;
+  }
+}
+
+async function markAllAsRead(userId) {
+  const cleanId = parseInt(String(userId).replace(/\D/g, ''), 10);
+  if (!cleanId) return false;
+
+  try {
+    const [res] = await db.query(
+      'UPDATE notification SET View_Status = 1, Read_Status = 1 WHERE To_User = ? AND (View_Status = 0 OR Read_Status = 0 OR View_Status IS NULL)',
+      [cleanId]
+    );
+    return Boolean(res && (res.affectedRows > 0 || res.changedRows > 0));
+  } catch (err) {
+    console.warn('[NotificationService] markAllAsRead error:', err.message);
+    return false;
+  }
+}
+
+module.exports = {
+  notifyAssignedUserOnDocumentUpload,
+  getUserNotifications,
+  markAsRead,
+  markAllAsRead,
+  getAssignedUserForStudent
+};

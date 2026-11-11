@@ -1,71 +1,73 @@
 const db = require('../../config/database');
 
-let cachedStudentList = null;
-
 async function getAllStudents() {
-  if (cachedStudentList && cachedStudentList.length > 0) {
-    return cachedStudentList;
-  }
   try {
-    const students = await db.loadActiveStudents();
-    cachedStudentList = (students || []).map(s => {
+    const [students] = await db.query(
+      'SELECT Student_Id, Student_Name, Email, Username, Password, Unique_Id, Proceeding_Course_Name FROM student WHERE DeleteStatus = 0 OR DeleteStatus IS NULL'
+    );
+
+    return (students || []).map(s => {
       const studentCode = String(s.Student_Id || s.Unique_Id || '').trim();
       return {
         id: `u-${studentCode}`,
-        studentCode: studentCode,
-        name: s.Student_Name || s.name || `Student ${studentCode}`,
-        email: s.Email || s.email || '',
-        username: s.Email || s.email || `student_${studentCode}`,
+        studentCode,
+        name: s.Student_Name || `Student ${studentCode}`,
+        email: s.Email || '',
+        username: s.Username || s.Email || `student_${studentCode}`,
         role: 'user',
-        department: s.Department_Name || s.department || 'General Operations',
-        assignedStaff: s.Assigned_Staff || null,
-        staffName: s.Staff_Name || null,
-        staffEmail: s.Staff_Email || null,
+        department: s.Proceeding_Course_Name || 'General Operations',
         documents: []
       };
     });
-    return cachedStudentList;
   } catch (err) {
-    console.warn('[StudentService] Notice loading student list from MySQL:', err.message);
+    console.warn('[StudentService] Error loading students from MySQL:', err.message);
     return [];
   }
 }
 
-function updateStudentInCache(studentId, updates = {}) {
-  const cleanId = String(studentId).replace(/^u-/, '').trim().toLowerCase();
-  if (cachedStudentList && Array.isArray(cachedStudentList)) {
-    const idx = cachedStudentList.findIndex(s => {
-      const code = String(s.studentCode || s.id || '').replace(/^u-/, '').trim().toLowerCase();
-      return code === cleanId;
-    });
-    if (idx !== -1) {
-      cachedStudentList[idx] = { ...cachedStudentList[idx], ...updates };
-    }
-  }
-}
-
-async function updateStudent(studentId, details) {
+async function updateStudent(studentId, details = {}) {
   const cleanId = String(studentId).replace(/^u-/, '').trim();
-  const dbSuccess = await db.updateStudentDetails(cleanId, details);
+  const sets = [];
+  const params = [];
 
-  const updates = {};
-  if (details.name !== undefined) updates.name = details.name;
-  if (details.email !== undefined) updates.email = details.email;
-  if (details.username !== undefined) updates.username = details.username;
-  if (details.department !== undefined) updates.department = details.department;
+  if (details.name !== undefined) {
+    sets.push('Student_Name = ?');
+    params.push(String(details.name).trim());
+  }
+  if (details.email !== undefined) {
+    sets.push('Email = ?');
+    params.push(String(details.email).trim());
+  }
+  if (details.username !== undefined) {
+    sets.push('Username = ?');
+    params.push(String(details.username).trim());
+  }
+  if (details.phone !== undefined) {
+    sets.push('Phone_Number = ?');
+    params.push(String(details.phone).trim());
+  }
+  if (details.department !== undefined) {
+    sets.push('Proceeding_Course_Name = ?');
+    params.push(String(details.department).trim());
+  }
+  if (details.password) {
+    sets.push('Password = ?');
+    params.push(String(details.password));
+  }
 
-  updateStudentInCache(cleanId, updates);
+  if (sets.length > 0) {
+    params.push(cleanId, cleanId);
+    const query = `UPDATE student SET ${sets.join(', ')} WHERE (Student_Id = ? OR Unique_Id = ?)`;
+    await db.query(query, params);
+  }
 
   return {
     studentId: cleanId,
-    dbUpdated: dbSuccess,
-    updatedFields: updates
+    updatedFields: details
   };
 }
 
 module.exports = {
   getAllStudents,
-  getStudentList: getAllStudents,
-  updateStudent,
-  updateStudentInCache
+  updateStudent
 };

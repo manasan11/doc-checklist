@@ -1459,6 +1459,8 @@ export class DashboardComponent implements OnInit {
   closeModals() {
     this.activeModal.set(null);
     this.selectedVersion.set(undefined);
+    this.newPassword.set('');
+    this.confirmPassword.set('');
     this.resetPasswordError.set('');
     this.resetPasswordLoading.set(false);
   }

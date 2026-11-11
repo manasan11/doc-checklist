@@ -28,27 +28,249 @@ function cacheUser(user) {
 function findUserById(userId) {
   if (!userId) return null;
   const cleanId = String(userId).trim().toLowerCase();
-  if (userCache.has(cleanId)) {
-    return userCache.get(cleanId);
-  }
-  // Try strip u-
+  if (userCache.has(cleanId)) return userCache.get(cleanId);
   const stripped = cleanId.replace(/^u-/, '');
-  if (userCache.has(stripped)) {
-    return userCache.get(stripped);
-  }
-  if (userCache.has(`u-${cleanId}`)) {
-    return userCache.get(`u-${cleanId}`);
-  }
+  if (userCache.has(stripped)) return userCache.get(stripped);
+  if (userCache.has(`u-${cleanId}`)) return userCache.get(`u-${cleanId}`);
   return null;
 }
 
 function findUserByEmailOrUsername(identifier) {
   if (!identifier) return null;
   const lower = String(identifier).trim().toLowerCase();
-  if (userCache.has(lower)) {
-    return userCache.get(lower);
+  return userCache.get(lower) || null;
+}
+
+// Direct DB Query: Find staff or admin from MySQL user_details table
+async function findStaffOrAdminInDb(identifier) {
+  if (!identifier) return null;
+  const clean = String(identifier).trim();
+  const cleanLower = clean.toLowerCase();
+
+  try {
+    const isEmail = clean.includes('@');
+    let query = '';
+    let params = [];
+
+    if (isEmail) {
+      query = 'SELECT * FROM user_details WHERE LOWER(TRIM(Email)) = ? AND (DeleteStatus = 0 OR DeleteStatus IS NULL) AND (Working_Status = 1 OR Working_Status = "1") LIMIT 1';
+      params = [cleanLower];
+    } else {
+      const isNum = /^\d+$/.test(clean);
+      if (isNum) {
+        query = 'SELECT * FROM user_details WHERE (LOWER(TRIM(User_Details_Name)) = ? OR LOWER(TRIM(Email)) = ? OR User_Details_Id = ? OR Employee_Id = ?) AND (DeleteStatus = 0 OR DeleteStatus IS NULL) AND (Working_Status = 1 OR Working_Status = "1") LIMIT 1';
+        params = [cleanLower, cleanLower, parseInt(clean, 10), parseInt(clean, 10)];
+      } else {
+        query = 'SELECT * FROM user_details WHERE (LOWER(TRIM(User_Details_Name)) = ? OR LOWER(TRIM(Email)) = ?) AND (DeleteStatus = 0 OR DeleteStatus IS NULL) AND (Working_Status = 1 OR Working_Status = "1") LIMIT 1';
+        params = [cleanLower, cleanLower];
+      }
+    }
+
+    const [rows] = await db.query(query, params);
+    if (rows && rows.length > 0) {
+      const u = rows[0];
+      const dept = (u.Department_Name || '').toLowerCase();
+      const role = (dept.includes('admin') || (u.User_Details_Name || '').toLowerCase() === 'admin') ? 'admin' : 'staff';
+      return {
+        id: `admin-${u.User_Details_Id}`,
+        name: u.User_Details_Name || 'Administrator',
+        email: u.Email || '',
+        username: u.User_Details_Name || u.Email,
+        password: u.Password,
+        role: role,
+        department: u.Department_Name || 'Operations & Compliance',
+        userDetailsId: u.User_Details_Id
+      };
+    }
+  } catch (err) {
+    console.warn('[AuthService] findStaffOrAdminInDb notice:', err.message);
   }
   return null;
+}
+
+// Direct DB Query: Find student from MySQL student table
+async function findStudentInDb(identifier) {
+  if (!identifier) return null;
+  const clean = String(identifier).trim();
+  const isEmail = clean.includes('@');
+  const prefixMatch = !isEmail ? clean.match(/^(?:u-|stu|student[-_]?)(\d+)$/i) : null;
+  const numPart = prefixMatch ? prefixMatch[1] : null;
+
+  try {
+    let query = '';
+    let params = [];
+
+    if (isEmail) {
+      query = 'SELECT * FROM student WHERE LOWER(TRIM(Email)) = LOWER(TRIM(?)) AND (DeleteStatus = 0 OR DeleteStatus IS NULL) LIMIT 1';
+      params = [clean];
+    } else {
+      query = 'SELECT * FROM student WHERE (Username = ? OR Student_Name = ?';
+      params = [clean, clean];
+      if (/^\d+$/.test(clean)) {
+        query += ' OR Student_Id = ?';
+        params.push(parseInt(clean, 10));
+      }
+      query += ' OR Unique_Id = ?';
+      params.push(clean);
+      if (numPart && numPart !== clean && /^\d+$/.test(numPart)) {
+        query += ' OR Student_Id = ?';
+        params.push(parseInt(numPart, 10));
+      }
+      query += ') AND (DeleteStatus = 0 OR DeleteStatus IS NULL) LIMIT 1';
+    }
+
+    const [stuRows] = await db.query(query, params);
+    if (stuRows && stuRows.length > 0) {
+      const s = stuRows[0];
+      const studentCode = String(s.Student_Id || s.Unique_Id || clean).trim();
+      return {
+        id: `u-${studentCode}`,
+        email: s.Email,
+        username: s.Username || s.Email,
+        name: s.Student_Name || s.Username || `Student ${studentCode}`,
+        password: s.Password,
+        role: 'user',
+        department: s.Proceeding_Course_Name || 'General Operations',
+        studentCode
+      };
+    }
+  } catch (err) {
+    console.warn('[AuthService] findStudentInDb error:', err.message);
+  }
+  return null;
+}
+
+function clearUserCache(userId, email, username, studentCode) {
+  const toDelete = [];
+  const uId = userId ? String(userId).toLowerCase().trim() : null;
+  const em = email ? String(email).toLowerCase().trim() : null;
+  const un = username ? String(username).toLowerCase().trim() : null;
+  const sc = studentCode ? String(studentCode).toLowerCase().trim() : null;
+
+  for (const [key, val] of userCache.entries()) {
+    const k = key.toLowerCase();
+    const vId = val?.id ? String(val.id).toLowerCase() : '';
+    const vEm = val?.email ? String(val.email).toLowerCase() : '';
+    const vUn = val?.username ? String(val.username).toLowerCase() : '';
+    const vSc = val?.studentCode ? String(val.studentCode).toLowerCase() : '';
+
+    if (
+      (uId && (k === uId || k === uId.replace(/^u-/, '') || k === uId.replace(/^admin-/, '') || vId === uId)) ||
+      (em && (k === em || vEm === em)) ||
+      (un && (k === un || vUn === un)) ||
+      (sc && (k === sc || k === `u-${sc}` || vSc === sc))
+    ) {
+      toDelete.push(key);
+    }
+  }
+  for (const k of toDelete) {
+    userCache.delete(k);
+  }
+}
+
+// Direct DB Query: Update password in user_details (admin/staff) or student tables
+async function updatePasswordInDb({ userId, studentCode, email, username, newPassword }) {
+  if (!newPassword) return false;
+  const cleanEmail = (email || '').toLowerCase().trim();
+  const cleanUsername = (username || '').toLowerCase().trim();
+  let updated = false;
+
+  try {
+    // 1. If explicit admin/staff userId (e.g. 'admin-151')
+    if (userId && String(userId).startsWith('admin-')) {
+      const adminId = parseInt(String(userId).replace(/^admin-/, ''), 10);
+      if (adminId) {
+        const [res] = await db.query(
+          'UPDATE user_details SET Password = ? WHERE User_Details_Id = ?',
+          [newPassword, adminId]
+        );
+        if (res && (res.affectedRows > 0 || res.changedRows > 0)) updated = true;
+      }
+    }
+
+    // 2. If explicit student userId (e.g. 'u-1')
+    if (!updated && userId && String(userId).startsWith('u-')) {
+      const sCode = String(userId).replace(/^u-/, '').trim();
+      const [res] = await db.query(
+        'UPDATE student SET Password = ? WHERE (Student_Id = ? OR Unique_Id = ?) AND (DeleteStatus = 0 OR DeleteStatus IS NULL)',
+        [newPassword, sCode, sCode]
+      );
+      if (res && (res.affectedRows > 0 || res.changedRows > 0)) updated = true;
+    }
+
+    // 3. By studentCode if provided and not an admin
+    if (!updated && studentCode && !String(studentCode).startsWith('admin-')) {
+      const cleanCode = String(studentCode).replace(/^u-/, '').trim();
+      const [res] = await db.query(
+        'UPDATE student SET Password = ? WHERE (Student_Id = ? OR Unique_Id = ?) AND (DeleteStatus = 0 OR DeleteStatus IS NULL)',
+        [newPassword, cleanCode, cleanCode]
+      );
+      if (res && (res.affectedRows > 0 || res.changedRows > 0)) updated = true;
+    }
+
+    // 4. By email: check user_details first, then student
+    if (!updated && cleanEmail) {
+      const [staffCheck] = await db.query(
+        'SELECT User_Details_Id FROM user_details WHERE LOWER(TRIM(Email)) = ? AND (DeleteStatus = 0 OR DeleteStatus IS NULL)',
+        [cleanEmail]
+      );
+      if (staffCheck && staffCheck.length > 0) {
+        const [res] = await db.query(
+          'UPDATE user_details SET Password = ? WHERE User_Details_Id = ?',
+          [newPassword, staffCheck[0].User_Details_Id]
+        );
+        if (res && (res.affectedRows > 0 || res.changedRows > 0)) updated = true;
+      } else {
+        const [res] = await db.query(
+          'UPDATE student SET Password = ? WHERE LOWER(TRIM(Email)) = ? AND (DeleteStatus = 0 OR DeleteStatus IS NULL)',
+          [newPassword, cleanEmail]
+        );
+        if (res && (res.affectedRows > 0 || res.changedRows > 0)) updated = true;
+      }
+    }
+
+    // 5. By username if not updated yet
+    if (!updated && cleanUsername) {
+      const [staffRes] = await db.query(
+        'UPDATE user_details SET Password = ? WHERE LOWER(TRIM(User_Details_Name)) = ? AND (DeleteStatus = 0 OR DeleteStatus IS NULL)',
+        [newPassword, cleanUsername]
+      );
+      if (staffRes && (staffRes.affectedRows > 0 || staffRes.changedRows > 0)) {
+        updated = true;
+      } else {
+        const [stuRes] = await db.query(
+          'UPDATE student SET Password = ? WHERE LOWER(TRIM(Username)) = ? AND (DeleteStatus = 0 OR DeleteStatus IS NULL)',
+          [newPassword, cleanUsername]
+        );
+        if (stuRes && (stuRes.affectedRows > 0 || stuRes.changedRows > 0)) updated = true;
+      }
+    }
+
+    // 6. Direct numeric ID fallback
+    if (!updated && userId && /^\d+$/.test(String(userId).trim())) {
+      const numId = parseInt(String(userId).trim(), 10);
+      const [staffRes] = await db.query(
+        'UPDATE user_details SET Password = ? WHERE User_Details_Id = ?',
+        [newPassword, numId]
+      );
+      if (staffRes && (staffRes.affectedRows > 0 || staffRes.changedRows > 0)) {
+        updated = true;
+      } else {
+        const [stuRes] = await db.query(
+          'UPDATE student SET Password = ? WHERE Student_Id = ? AND (DeleteStatus = 0 OR DeleteStatus IS NULL)',
+          [newPassword, numId]
+        );
+        if (stuRes && (stuRes.affectedRows > 0 || stuRes.changedRows > 0)) updated = true;
+      }
+    }
+  } catch (err) {
+    console.warn('[AuthService] updatePasswordInDb error:', err.message);
+  }
+
+  // Clear in-memory cache so no stale password can ever be used
+  clearUserCache(userId, cleanEmail, cleanUsername, studentCode);
+
+  return updated;
 }
 
 async function findOrLoadUser(userId) {
@@ -56,153 +278,59 @@ async function findOrLoadUser(userId) {
   const existing = findUserById(userId);
   if (existing) return existing;
 
-  try {
-    if (String(userId).startsWith('admin-')) {
-      const staff = await db.findStaffOrAdminUser(String(userId).replace(/^admin-/, ''));
-      if (staff) {
-        const newAdmin = {
-          id: staff.id,
-          email: staff.email || '',
-          username: staff.username || staff.name,
-          name: staff.name,
-          password: staff.password,
-          role: staff.role,
-          department: staff.department,
-          documents: []
-        };
-        return cacheUser(newAdmin);
-      }
-    }
-
-    const rawId = String(userId).replace(/^u-/, '').trim();
-    const s = await db.findUserByIdentifier(rawId);
-    if (s) {
-      const studentCode = String(s.studentCode || rawId).trim();
-      const newUser = {
-        id: s.id || `u-${studentCode}`,
-        email: s.email || '',
-        username: s.username || s.email || `student_${studentCode}`,
-        name: s.name || `Student ${studentCode}`,
-        password: s.password || '',
-        role: s.role || 'user',
-        department: s.department || 'General Operations',
-        studentCode: studentCode,
-        driveFolderId: null,
-        driveFolderName: null,
-        documents: []
-      };
-      return cacheUser(newUser);
-    }
-  } catch (err) {
-    console.warn('[AuthService] findOrLoadUser error:', err.message);
+  if (String(userId).startsWith('admin-')) {
+    const staff = await findStaffOrAdminInDb(String(userId).replace(/^admin-/, ''));
+    if (staff) return cacheUser(staff);
   }
+
+  const rawId = String(userId).replace(/^u-/, '').trim();
+  const student = await findStudentInDb(rawId);
+  if (student) return cacheUser(student);
+
+  // Fallback check staff
+  const staff = await findStaffOrAdminInDb(rawId);
+  if (staff) return cacheUser(staff);
+
   return null;
 }
 
-async function authenticateUser(identifier, password) {
-  if (!identifier || !password) return null;
-  const cleanId = String(identifier).trim();
-  const cleanLower = cleanId.toLowerCase();
+async function authenticate(username, password) {
+  if (!username || !password) return { error: 'Username and password are required' };
+  const cleanId = String(username).trim();
   const passTrim = String(password).trim();
-  let accountExists = false;
 
-  // 1. Check MySQL user_details table (Admin and Staff authentication)
-  try {
-    const staffUser = await db.findStaffOrAdminUser(cleanId);
-    if (staffUser) {
-      accountExists = true;
-      const expectedPass = staffUser.password ? String(staffUser.password).trim() : null;
-      if (expectedPass && (expectedPass === passTrim || expectedPass.toLowerCase() === passTrim.toLowerCase())) {
-        let user = findUserById(staffUser.id);
-        if (!user) {
-          user = {
-            id: staffUser.id,
-            email: staffUser.email,
-            username: staffUser.username,
-            name: staffUser.name,
-            password: staffUser.password,
-            role: staffUser.role,
-            department: staffUser.department,
-            documents: []
-          };
-          cacheUser(user);
-        } else {
-          user.password = staffUser.password;
-          user.role = staffUser.role;
-        }
-        return user;
-      }
+  // 1. Check MySQL user_details (Staff / Admin)
+  const staff = await findStaffOrAdminInDb(cleanId);
+  if (staff) {
+    const expectedPass = staff.password ? String(staff.password).trim() : '';
+    if (expectedPass === passTrim || expectedPass.toLowerCase() === passTrim.toLowerCase()) {
+      return { user: cacheUser(staff) };
     }
-  } catch (err) {
-    console.warn('[AuthService] Notice querying user_details for login:', err.message);
+    return { error: 'Incorrect password.' };
   }
 
-  // 2. Optional Environment Admin fallback (only if BOTH ADMIN_USERNAME and ADMIN_PASSWORD are configured in .env)
-  if (process.env.ADMIN_USERNAME && process.env.ADMIN_PASSWORD) {
-    const envAdmin = process.env.ADMIN_USERNAME.trim().toLowerCase();
-    if (cleanLower === envAdmin) {
-      accountExists = true;
-      if (passTrim === process.env.ADMIN_PASSWORD.trim() || passTrim.toLowerCase() === process.env.ADMIN_PASSWORD.trim().toLowerCase()) {
-        let user = findUserById('u-admin');
-        if (!user) {
-          user = {
-            id: 'u-admin',
-            email: process.env.SMTP_USER || '',
-            username: process.env.ADMIN_USERNAME,
-            name: 'Administrator',
-            password: process.env.ADMIN_PASSWORD,
-            role: 'admin',
-            department: 'Operations & Compliance',
-            documents: []
-          };
-          cacheUser(user);
-        }
-        return user;
-      }
+  // 2. Check MySQL student table
+  const student = await findStudentInDb(cleanId);
+  if (student) {
+    const expectedPass = student.password ? String(student.password).trim() : '';
+    if (expectedPass === passTrim || expectedPass.toLowerCase() === passTrim.toLowerCase()) {
+      return { user: cacheUser(student) };
     }
-  }
-
-  // 3. Query MySQL student table
-  try {
-    const stu = await db.findUserByIdentifier(cleanId);
-    if (stu) {
-      accountExists = true;
-      const expectedPass = stu.password ? String(stu.password).trim() : null;
-      if (expectedPass && (expectedPass === passTrim || expectedPass.toLowerCase() === passTrim.toLowerCase())) {
-        const user = await findOrLoadUser(stu.id);
-        if (user) {
-          user.password = expectedPass;
-        }
-        return user || stu;
-      }
-    }
-  } catch (err) {
-    console.warn('[AuthService] Notice querying MySQL for student login:', err.message);
-  }
-
-  // 4. Memory check for existing cached user
-  const user = findUserByEmailOrUsername(cleanLower);
-  if (user) {
-    accountExists = true;
-    if (user.password && (String(user.password).trim() === passTrim || String(user.password).trim().toLowerCase() === passTrim.toLowerCase())) {
-      return user;
-    }
-  }
-
-  if (accountExists) {
     return { error: 'Incorrect password.' };
   }
 
   return { error: 'Account not found. Only registered users in the database can log in.' };
 }
 
+function generateToken(user) {
+  return jwt.sign(
+    { id: user.id, email: user.email, name: user.name, role: user.role },
+    config.jwtSecret,
+    { expiresIn: '24h' }
+  );
+}
+
 function createResetToken(email, user = null) {
-  const now = Date.now();
-  for (const key of Object.keys(resetTokens)) {
-    if (!resetTokens[key]?.expiresAt || resetTokens[key].expiresAt < now) {
-      delete resetTokens[key];
-    }
-  }
   const token = Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
   resetTokens[token] = {
     email,
@@ -214,121 +342,20 @@ function createResetToken(email, user = null) {
   return token;
 }
 
-async function verifyAndResetPassword(token, newPassword) {
-  const record = resetTokens[token];
-  if (!record || record.expiresAt < Date.now()) {
-    return { success: false, message: 'Reset link has expired or is invalid. Please request a new one.' };
-  }
-
-  const targetEmail = (record.email || '').toLowerCase().trim();
-  const targetUsername = (record.username || '').toLowerCase().trim();
-  const studentCode = record.studentCode || (record.userId ? String(record.userId).replace(/^u-/, '') : null);
-
-  let mysqlUpdated = false;
-  try {
-    mysqlUpdated = await db.updateUserPassword(studentCode, targetEmail, targetUsername || targetEmail, newPassword);
-  } catch (err) {
-    console.warn('[AuthService] MySQL update error during password reset:', err.message);
-  }
-
-  // Update cached user if present
-  let foundLocal = false;
-  for (const u of userCache.values()) {
-    const uEmail = (u.email || '').toLowerCase().trim();
-    const uUser = (u.username || '').toLowerCase().trim();
-    const uCode = u.studentCode || (u.id ? String(u.id).replace(/^u-/, '') : null);
-    if (
-      (targetEmail && uEmail === targetEmail) ||
-      (targetUsername && uUser === targetUsername) ||
-      (studentCode && uCode === studentCode)
-    ) {
-      u.password = newPassword;
-      foundLocal = true;
-    }
-  }
-
-  if (!foundLocal && !mysqlUpdated) {
-    return { success: false, message: 'User account not found.' };
-  }
-
-  delete resetTokens[token];
-  return { success: true, email: targetEmail };
-}
-
-async function updateUserPassword(userId, newPassword) {
-  let user = findUserById(userId);
-  if (!user) {
-    user = await findOrLoadUser(userId);
-  }
-  if (!user) {
-    return { success: false, message: 'User account not found.' };
-  }
-
-  user.password = newPassword;
-
-  try {
-    const studentCode = user.studentCode || String(userId || '').replace(/^u-/, '').trim();
-    const cleanEmail = (user.email || '').toLowerCase().trim();
-    const cleanUsername = (user.username || '').toLowerCase().trim();
-    await db.updateUserPassword(studentCode, cleanEmail, cleanUsername, newPassword);
-  } catch (err) {
-    console.warn('[MySQL] Error updating password in database:', err.message);
-  }
-
-  return { success: true, email: user.email };
-}
-
-async function authenticate(username, password) {
-  const result = await authenticateUser(username, password);
-  if (!result || result.error) {
-    return { error: result?.error || 'Invalid credentials' };
-  }
-  return { user: result };
-}
-
-function generateToken(user) {
-  return jwt.sign(
-    { id: user.id, email: user.email, name: user.name, role: user.role },
-    config.jwtSecret,
-    { expiresIn: '24h' }
-  );
-}
-
 async function requestPasswordReset(emailInput, originHeader) {
-  const trimmedInput = (emailInput || '').trim();
-  const cleanLower = trimmedInput.toLowerCase();
-
-  let user = null;
-  try {
-    user = await db.findUserByIdentifier(cleanLower);
-  } catch (err) {
-    console.warn('[AuthService] findUserByIdentifier warning:', err.message);
-  }
-
-  if (!user) {
-    user = findUserByEmailOrUsername(trimmedInput);
-  }
+  const clean = (emailInput || '').trim();
+  let user = await findStudentInDb(clean) || await findStaffOrAdminInDb(clean) || findUserByEmailOrUsername(clean);
 
   if (!user) {
     return { error: 'No account registered with this email or username in the database', status: 404 };
   }
 
-  let targetEmail = trimmedInput.includes('@') ? trimmedInput : null;
-  if (user && user.email && user.email.trim() && !user.email.endsWith('@example.com')) {
-    targetEmail = user.email.trim();
-  } else if (user && user.role === 'admin') {
-    targetEmail = config.smtp.user || 'Docs@ysquareoverseas.com';
-  }
-
+  const targetEmail = user.email || (clean.includes('@') ? clean : null);
   if (!targetEmail) {
-    return {
-      error: `The account "${user.name || user.username || trimmedInput}" does not have an email address in the database. Please enter your email address.`,
-      status: 400
-    };
+    return { error: 'No email address found for this account. Please contact admin.', status: 400 };
   }
 
   const resetToken = createResetToken(targetEmail, user);
-
   let clientOrigin = config.frontendUrl;
   if (originHeader) {
     try {
@@ -345,75 +372,128 @@ async function requestPasswordReset(emailInput, originHeader) {
   try {
     mailResult = await mailService.sendPasswordResetEmail({
       to: targetEmail,
-      name: user.name || 'Student',
+      name: user.name || 'User',
       resetLink,
       token: resetToken
     });
-  } catch (mailErr) {
-    console.error('[AuthService] Mail error:', mailErr.message);
+  } catch (err) {
+    console.error('[AuthService] Mail error:', err.message);
   }
 
   return {
     success: true,
     message: mailResult.liveEmailSent
-      ? `A password reset link has been sent to your registered email (${user.email}). Please check your inbox and click the link to reset your password.`
-      : `Password reset link prepared for ${user.email}. Check your email or use the reset link below.`,
+      ? `A password reset link has been sent to ${targetEmail}.`
+      : `Password reset link prepared for ${targetEmail}.`,
     resetLink,
     resetToken,
-    email: user.email,
-    liveEmailSent: mailResult.liveEmailSent,
-    instructions: `Please click the link sent to your registered email address (${user.email}) to set a new password.`
+    email: targetEmail
   };
 }
 
 async function resetPassword(token, newPassword) {
-  const result = await verifyAndResetPassword(token, newPassword);
-  if (!result.success) {
-    return { success: false, error: result.message };
+  const record = resetTokens[token];
+  if (!record || record.expiresAt < Date.now()) {
+    return { success: false, error: 'Reset link has expired or is invalid.' };
   }
 
-  try {
-    if (result.email) {
-      await db.updateUserPassword(result.studentCode || null, result.email, result.username || null, newPassword);
-    }
-  } catch (err) {
-    console.warn('[AuthService] MySQL notice updating password:', err.message);
+  const cleanPass = String(newPassword || '').trim();
+  if (!cleanPass || cleanPass.length < 6) {
+    return { success: false, error: 'Password must be at least 6 characters long.' };
   }
+
+  // Prevent reusing existing password
+  let user = null;
+  if (record.userId) user = await findOrLoadUser(record.userId);
+  if (!user && record.email) user = await findStaffOrAdminInDb(record.email) || await findStudentInDb(record.email);
+  if (!user && record.username) user = await findStaffOrAdminInDb(record.username) || await findStudentInDb(record.username);
+
+  if (user && user.password) {
+    const existingPass = String(user.password).trim();
+    if (existingPass === cleanPass || existingPass.toLowerCase() === cleanPass.toLowerCase()) {
+      return {
+        success: false,
+        error: 'New password cannot be the same as your old password. Please choose a different password.'
+      };
+    }
+  }
+
+  const updated = await updatePasswordInDb({
+    userId: record.userId || user?.id,
+    studentCode: record.studentCode || user?.studentCode,
+    email: record.email || user?.email,
+    username: record.username || user?.username,
+    newPassword: cleanPass
+  });
+
+  if (!updated) {
+    return {
+      success: false,
+      error: 'Failed to update password in database. Please try again.'
+    };
+  }
+
+  clearUserCache(record.userId || user?.id, record.email || user?.email, record.username || user?.username, record.studentCode || user?.studentCode);
+  delete resetTokens[token];
 
   return {
     success: true,
-    email: result.email,
-    message: 'Password has been successfully updated. You may now log in with your new password.'
+    email: record.email,
+    message: 'Password has been successfully updated.'
   };
 }
 
 async function changePassword(userId, userEmail, newPassword) {
-  const result = await updateUserPassword(userId, newPassword);
-  if (!result.success) {
-    return { success: false, error: result.message || 'Failed to update password.' };
+  const cleanPass = String(newPassword || '').trim();
+  if (!cleanPass || cleanPass.length < 6) {
+    return { success: false, error: 'Password must be at least 6 characters long.' };
   }
 
-  return { success: true, message: 'Your password has been reset successfully.' };
+  const user = await findOrLoadUser(userId);
+  if (user && user.password) {
+    const existingPass = String(user.password).trim();
+    if (existingPass === cleanPass || existingPass.toLowerCase() === cleanPass.toLowerCase()) {
+      return {
+        success: false,
+        error: 'New password cannot be the same as your current password. Please choose a different password.'
+      };
+    }
+  }
+
+  const updated = await updatePasswordInDb({
+    userId,
+    studentCode: user?.studentCode,
+    email: userEmail || user?.email,
+    username: user?.username,
+    newPassword: cleanPass
+  });
+
+  if (!updated) {
+    return {
+      success: false,
+      error: 'Failed to update password in database. Please verify your account and try again.'
+    };
+  }
+
+  if (user) user.password = cleanPass;
+  clearUserCache(userId, userEmail || user?.email, user?.username, user?.studentCode);
+
+  return {
+    success: true,
+    message: 'Password updated in database successfully.'
+  };
 }
 
 module.exports = {
-  // User cache & lookup
   cacheUser,
   findUserById,
   findUserByEmailOrUsername,
   findOrLoadUser,
-  authenticateUser,
-  userCache,
-
-  // Reset tokens & passwords
-  createResetToken,
-  verifyAndResetPassword,
-  updateUserPassword,
-
-  // Auth operations
   authenticate,
   generateToken,
   requestPasswordReset,
   resetPassword,
-  changePassword
+  changePassword,
+  findStaffOrAdminInDb,
+  findStudentInDb
 };

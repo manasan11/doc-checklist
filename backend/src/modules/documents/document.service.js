@@ -4,6 +4,175 @@ const driveService = require('../../services/drive.service');
 const authService = require('../auth/auth.service');
 const notificationService = require('../notifications/notification.service');
 
+// Direct DB queries on MySQL tables
+async function getStudentUploadedDocuments(studentCode, legacyNumId = null) {
+  const cleanCode = String(studentCode).trim();
+  const numPart = cleanCode.replace(/\D/g, '');
+  try {
+    const targets = new Set();
+    if (numPart) targets.add(Number(numPart));
+    else targets.add(cleanCode);
+    if (legacyNumId && !isNaN(Number(legacyNumId))) targets.add(Number(legacyNumId));
+
+    const targetList = Array.from(targets);
+    const placeholders = targetList.map(() => '?').join(' OR Student_Id = ');
+    const query = `SELECT * FROM student_document WHERE (Student_Id = ${placeholders}) AND (DeleteStatus = 0 OR DeleteStatus IS NULL) ORDER BY Student_Document_Id ASC`;
+
+    const [stuDocs] = await db.query(query, targetList);
+    return stuDocs || [];
+  } catch (err) {
+    console.warn('[DocumentService] getStudentUploadedDocuments error:', err.message);
+    return [];
+  }
+}
+
+async function ensureMasterDocument(docId, docName, docTypeId = 1) {
+  if (!docId) return false;
+  try {
+    await db.query(
+      'INSERT INTO document (Document_Id, Document_Name, Document_Type_Id, DeleteStatus) VALUES (?, ?, ?, 0) ON DUPLICATE KEY UPDATE Document_Name=VALUES(Document_Name), DeleteStatus=0',
+      [docId, docName, docTypeId]
+    );
+    return true;
+  } catch (err) {
+    console.warn('[DocumentService] ensureMasterDocument error:', err.message);
+    return false;
+  }
+}
+
+async function getFollowupUserByStudentAndDept(studentId, deptId = null) {
+  if (!studentId) return null;
+  const cleanStudent = String(studentId).replace(/^u-/, '').trim();
+  const cleanDept = deptId ? String(deptId).trim() : null;
+  try {
+    let query = 'SELECT Student_FollowUp_Id, Student_Id, Department, Dept_Name, User_Id, UserName, Entry_date FROM student_followup WHERE Student_Id = ?';
+    const params = [cleanStudent];
+    if (cleanDept) {
+      query += ' AND (Department = ? OR Dept_Name = ?)';
+      params.push(cleanDept, cleanDept);
+    }
+    query += ' AND (DeleteStatus = 0 OR DeleteStatus IS NULL) ORDER BY Entry_date DESC, Student_FollowUp_Id DESC LIMIT 1';
+
+    const [rows] = await db.query(query, params);
+    return rows && rows.length > 0 ? rows[0] : null;
+  } catch (err) {
+    console.warn('[DocumentService] getFollowupUserByStudentAndDept error:', err.message);
+    return null;
+  }
+}
+
+async function insertStudentDocument(studentCode, fileName, docId, docName, driveLink, notes = '', assignedStaff = null, verificationStatus = 0) {
+  if (!studentCode) return null;
+  const cleanStudentNum = String(studentCode).replace(/\D/g, '');
+  const cleanStudent = cleanStudentNum ? Number(cleanStudentNum) : String(studentCode).replace(/^u-/, '').trim();
+  const cleanStaffNum = assignedStaff ? String(assignedStaff).replace(/\D/g, '') : null;
+  const cleanStaff = cleanStaffNum ? Number(cleanStaffNum) : (assignedStaff || null);
+  try {
+    const [res] = await db.query(`
+      INSERT INTO student_document (
+        Student_Id, Entry_date, File_Name, Document_Id, Document_Name, Image, Description, DeleteStatus, Assigned_Staff, Verification_Status
+      ) VALUES (?, NOW(), ?, ?, ?, ?, ?, 0, ?, ?)
+    `, [cleanStudent, fileName, docId, docName, driveLink, notes || '', cleanStaff, verificationStatus !== undefined && verificationStatus !== null ? Number(verificationStatus) : 0]);
+    return res?.insertId || null;
+  } catch (err) {
+    console.warn('[DocumentService] insertStudentDocument error:', err.message);
+    return null;
+  }
+}
+
+async function getActiveStudentDocumentIds(studentCode, legacyNumId, docId) {
+  if (!studentCode) return [];
+  const cleanStudentNum = String(studentCode).replace(/\D/g, '');
+  const cleanId = cleanStudentNum ? Number(cleanStudentNum) : String(studentCode).replace(/^u-/, '').trim();
+  try {
+    const [rows] = await db.query(
+      'SELECT Student_Document_Id FROM student_document WHERE Student_Id = ? AND Document_Id = ? AND (DeleteStatus = 0 OR DeleteStatus IS NULL) ORDER BY Student_Document_Id ASC',
+      [cleanId, Number(docId)]
+    );
+    return rows || [];
+  } catch (err) {
+    console.warn('[DocumentService] getActiveStudentDocumentIds error:', err.message);
+    return [];
+  }
+}
+
+async function softDeleteStudentDocumentById(studentDocumentId) {
+  if (!studentDocumentId) return false;
+  try {
+    await db.query('UPDATE student_document SET DeleteStatus = 1 WHERE Student_Document_Id = ?', [studentDocumentId]);
+    return true;
+  } catch (err) {
+    console.warn('[DocumentService] softDeleteStudentDocumentById error:', err.message);
+    return false;
+  }
+}
+
+async function softDeleteAllStudentDocuments(studentCode, legacyNumId, docId) {
+  if (!studentCode) return false;
+  const cleanStudentNum = String(studentCode).replace(/\D/g, '');
+  const cleanId = cleanStudentNum ? Number(cleanStudentNum) : String(studentCode).replace(/^u-/, '').trim();
+  try {
+    await db.query('UPDATE student_document SET DeleteStatus = 1 WHERE Student_Id = ? AND Document_Id = ?', [cleanId, Number(docId)]);
+    return true;
+  } catch (err) {
+    console.warn('[DocumentService] softDeleteAllStudentDocuments error:', err.message);
+    return false;
+  }
+}
+
+async function updateStudentDocumentVerificationStatus(studentIdOrDocId, docIdOrStatus, statusOrReason, rejectionReason = null, studentDocumentId = null) {
+  if (typeof studentIdOrDocId === 'number' && typeof docIdOrStatus === 'number' && (studentDocumentId === null || studentDocumentId === undefined)) {
+    const sDocId = studentIdOrDocId;
+    const vStatus = Number(docIdOrStatus) || 0;
+    const reason = vStatus === 2 ? (statusOrReason ? String(statusOrReason).trim() : null) : null;
+    try {
+      await db.query('UPDATE student_document SET Verification_Status = ?, rejection_reason = ? WHERE Student_Document_Id = ?', [vStatus, reason, sDocId]);
+      return true;
+    } catch (err) {
+      console.warn('[DocumentService] updateStudentDocumentVerificationStatus error:', err.message);
+      return false;
+    }
+  }
+
+  const cleanStudentNum = String(studentIdOrDocId).replace(/\D/g, '');
+  const cleanId = cleanStudentNum ? Number(cleanStudentNum) : String(studentIdOrDocId).replace(/^u-/, '').trim();
+  const vStatus = Number(statusOrReason) || 0;
+  const reasonVal = vStatus === 2 ? (rejectionReason ? String(rejectionReason).trim() : null) : null;
+
+  try {
+    if (studentDocumentId) {
+      const [res] = await db.query(
+        'UPDATE student_document SET Verification_Status = ?, rejection_reason = ? WHERE Student_Document_Id = ? AND Student_Id = ? AND (DeleteStatus = 0 OR DeleteStatus IS NULL)',
+        [vStatus, reasonVal, Number(studentDocumentId), cleanId]
+      );
+      return Boolean(res && res.affectedRows > 0);
+    } else {
+      const [res] = await db.query(
+        'UPDATE student_document SET Verification_Status = ?, rejection_reason = ? WHERE Student_Id = ? AND Document_Id = ? AND (DeleteStatus = 0 OR DeleteStatus IS NULL) ORDER BY Student_Document_Id DESC LIMIT 1',
+        [vStatus, reasonVal, cleanId, Number(docIdOrStatus)]
+      );
+      return Boolean(res && res.affectedRows > 0);
+    }
+  } catch (err) {
+    console.warn('[DocumentService] updateStudentDocumentVerificationStatus error:', err.message);
+    return false;
+  }
+}
+
+async function updateStudentDocumentStaff(studentCode, staffUserId) {
+  if (!studentCode || !staffUserId) return false;
+  const cleanStudentNum = String(studentCode).replace(/\D/g, '');
+  const cleanStudent = cleanStudentNum ? Number(cleanStudentNum) : String(studentCode).replace(/^u-/, '').trim();
+  const cleanStaff = Number(staffUserId);
+  try {
+    await db.query('UPDATE student_document SET Assigned_Staff = ? WHERE Student_Id = ? AND (Assigned_Staff IS NULL OR Assigned_Staff = 0)', [cleanStaff, cleanStudent]);
+    return true;
+  } catch (err) {
+    console.warn('[DocumentService] updateStudentDocumentStaff error:', err.message);
+    return false;
+  }
+}
+
 function toGoogleDriveViewUrl(urlOrPath, fallbackFileId = null) {
   if (!urlOrPath && !fallbackFileId) return '';
   const val = String(urlOrPath || '').trim();
@@ -242,10 +411,7 @@ function setUserDriveFolder(userId, folderId, folderName) {
   if (user) {
     user.driveFolderId = folderId;
     user.driveFolderName = folderName;
-    try {
-      const studentCode = user.studentCode || String(userId).replace(/^u-/, '').trim();
-      db.updateUserDriveFolder(studentCode, folderId, folderName).catch(() => {});
-    } catch (_) {}
+    // User folder updated in memory
   }
   return user;
 }
@@ -262,7 +428,7 @@ async function getOrLoadUserDocuments(userId) {
     const templates = await getMasterDocTemplates();
     user.documents = JSON.parse(JSON.stringify(templates));
 
-    const stuDocs = await db.getStudentUploadedDocuments(studentCode, legacyNumId);
+    const stuDocs = await getStudentUploadedDocuments(studentCode, legacyNumId);
 
     const recordsByDocId = new Map();
     const unmappedRecords = [];
@@ -347,22 +513,22 @@ async function syncSingleUploadToMysql(userId, doc, fileResult, userNotes = "") 
     const directDriveLink = toGoogleDriveViewUrl(fileResult.driveWebViewLink || fileResult.webViewLink, fileResult.driveFileId);
 
     if (!knownMasterDocIds || !knownMasterDocIds.has(doc.id)) {
-      await db.ensureMasterDocument(doc.id, doc.name);
+      await ensureMasterDocument(doc.id, doc.name);
       if (knownMasterDocIds) knownMasterDocIds.add(doc.id);
     }
 
     if (studentCode) {
       let assignedStaff = user?.assignedStaff || null;
-      if (!assignedStaff && db.getFollowupUserByStudentAndDept) {
+      if (!assignedStaff) {
         try {
-          const followup = await db.getFollowupUserByStudentAndDept(studentCode, null);
+          const followup = await getFollowupUserByStudentAndDept(studentCode, null);
           if (followup && followup.User_Id) assignedStaff = followup.User_Id;
         } catch (_) {}
       }
 
       const fileName = fileResult?.fileName || doc?.fileName || doc?.name || 'Document';
       const docName = doc?.name || fileName;
-      const insertResult = await db.insertStudentDocument(
+      const insertResult = await insertStudentDocument(
         studentCode,
         fileName,
         doc.id,
@@ -577,7 +743,7 @@ async function deleteDocument(userId, docId, versionNumber) {
 
     if (!targetStudentDocId) {
       try {
-        const activeRows = await db.getActiveStudentDocumentIds(studentCode, legacyNumId, numericDocId);
+        const activeRows = await getActiveStudentDocumentIds(studentCode, legacyNumId, numericDocId);
         if (activeRows && activeRows[vNum - 1]) {
           targetStudentDocId = activeRows[vNum - 1].Student_Document_Id;
         }
@@ -588,7 +754,7 @@ async function deleteDocument(userId, docId, versionNumber) {
 
     if (targetStudentDocId) {
       try {
-        await db.softDeleteStudentDocumentById(targetStudentDocId);
+        await softDeleteStudentDocumentById(targetStudentDocId);
       } catch (err) {
         console.error('[MySQL Single Row Soft-Delete Error]:', err.message);
       }
@@ -636,7 +802,7 @@ async function deleteDocument(userId, docId, versionNumber) {
   } else {
     fileIdToDelete = doc.driveFileId;
     try {
-      await db.softDeleteAllStudentDocuments(studentCode, legacyNumId, numericDocId);
+      await softDeleteAllStudentDocuments(studentCode, legacyNumId, numericDocId);
     } catch (err) {
       console.error('[MySQL Full Delete Error]:', err.message);
     }
@@ -717,7 +883,7 @@ function adminReviewDocument(userId, docId, { approvalStatus, verificationStatus
       } else if (vStatus === 1 || vStatus === 0) {
         doc.rejectionReason = '';
       }
-      db.updateStudentDocumentVerificationStatus(cleanCode, doc.id, vStatus, doc.rejectionReason, studentDocumentId);
+      updateStudentDocumentVerificationStatus(cleanCode, doc.id, vStatus, doc.rejectionReason, studentDocumentId);
     } catch (dbErr) {
       console.warn('[DocumentService] Error updating Verification_Status in MySQL:', dbErr.message);
     }
@@ -931,7 +1097,7 @@ async function getChecklist(targetUserId, studentIdParam, deptIdParam, syncDrive
   if (studentIdParam || deptIdParam) {
     try {
       const lookupStudent = studentIdParam || targetUserId;
-      const fRecord = await db.getFollowupUserByStudentAndDept(lookupStudent, deptIdParam);
+      const fRecord = await getFollowupUserByStudentAndDept(lookupStudent, deptIdParam);
       if (fRecord) {
         followup = {
           studentFollowUpId: fRecord.Student_FollowUp_Id,
@@ -978,14 +1144,14 @@ async function getChecklist(targetUserId, studentIdParam, deptIdParam, syncDrive
 
 async function getFollowupDocuments(studentId, deptId) {
   const cleanStudentCode = String(studentId).replace(/^u-/, '').trim();
-  const followupRecord = await db.getFollowupUserByStudentAndDept(cleanStudentCode, deptId);
+  const followupRecord = await getFollowupUserByStudentAndDept(cleanStudentCode, deptId);
 
   const associatedUserId = followupRecord ? followupRecord.User_Id : null;
   const associatedUserName = followupRecord ? followupRecord.UserName : null;
 
-  if (associatedUserId && db.updateStudentDocumentStaff) {
+  if (associatedUserId) {
     try {
-      await db.updateStudentDocumentStaff(cleanStudentCode, associatedUserId);
+      await updateStudentDocumentStaff(cleanStudentCode, associatedUserId);
     } catch (_) {}
   }
 

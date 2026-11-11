@@ -935,6 +935,9 @@ export class LoginComponent implements OnInit, AfterViewInit {
           this.username = res.email || this.targetEmail();
         }
         this.password = '';
+        if (this.passwordInputRef?.nativeElement) {
+          this.passwordInputRef.nativeElement.value = '';
+        }
         this.newPassword = '';
         this.confirmPassword = '';
         this.resetTokenInput = '';
