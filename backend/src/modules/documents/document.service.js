@@ -2,6 +2,7 @@ const path = require('path');
 const db = require('../../config/database');
 const driveService = require('../../services/drive.service');
 const authService = require('../auth/auth.service');
+const notificationService = require('../notifications/notification.service');
 
 function toGoogleDriveViewUrl(urlOrPath, fallbackFileId = null) {
   if (!urlOrPath && !fallbackFileId) return '';
@@ -504,6 +505,22 @@ async function saveDocumentUpload(userId, docId, fileResult, userNotes = "", doc
   if (newStudentDocId && finalDoc && finalDoc.versions && finalDoc.versions.length > 0) {
     finalDoc.versions[finalDoc.versions.length - 1].studentDocumentId = newStudentDocId;
   }
+
+  // Trigger notification to the user assigned to this student after successful upload & database insert
+  try {
+    const studentCode = user.studentCode || String(userId).replace(/^u-/, '').trim();
+    const docName = (finalDoc && finalDoc.name) || documentType || fileResult.fileName || 'Document';
+    await notificationService.notifyAssignedUserOnDocumentUpload({
+      studentId: studentCode,
+      studentName: user.name || 'Student',
+      docName,
+      uploadDateTime: formattedDate,
+      userNotes
+    });
+  } catch (notifErr) {
+    console.warn('[DocumentService] Notice triggering upload notification:', notifErr.message);
+  }
+
   // Refresh checklist from MySQL so that in-memory cache and UI state are 100% synchronized
   await getOrLoadUserDocuments(userId);
   return getDocumentById(userId, targetDocId) || finalDoc;

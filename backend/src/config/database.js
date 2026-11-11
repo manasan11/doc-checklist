@@ -528,6 +528,214 @@ async function upsertStudent(studentCode, name, email, username, password) {
   }
 }
 
+async function getAssignedUserForStudent(studentIdentifier) {
+  const pool = getPool();
+  if (!pool || !studentIdentifier) return null;
+  const clean = String(studentIdentifier).replace(/^u-/, '').trim();
+  const numId = /^\d+$/.test(clean) ? parseInt(clean, 10) : null;
+  let resolvedStudentId = numId;
+  let resolvedStudentName = '';
+
+  try {
+    const [stuRows] = await pool.query(
+      'SELECT Student_Id, Student_Name, To_User_Id, To_User_Name FROM student WHERE (Student_Id = ? AND ? IS NOT NULL) OR Unique_Id = ? OR Email = ? LIMIT 1',
+      [numId, numId, clean, clean]
+    );
+
+    let stuRow = stuRows && stuRows.length > 0 ? stuRows[0] : null;
+    if (stuRow) {
+      resolvedStudentId = stuRow.Student_Id;
+      resolvedStudentName = stuRow.Student_Name || '';
+    }
+
+    if (!resolvedStudentId) return null;
+
+    const [followRows] = await pool.query(
+      'SELECT sf.Student_FollowUp_Id, sf.Student_Id, sf.User_Id, COALESCE(ud.User_Details_Name, sf.UserName) AS UserName, sf.Dept_Name FROM student_followup sf LEFT JOIN user_details ud ON sf.User_Id = ud.User_Details_Id WHERE sf.Student_Id = ? AND (sf.DeleteStatus = 0 OR sf.DeleteStatus IS NULL) AND sf.User_Id IS NOT NULL AND sf.User_Id > 0 ORDER BY sf.Student_FollowUp_Id DESC LIMIT 1',
+      [resolvedStudentId]
+    );
+
+    if (followRows && followRows.length > 0) {
+      return {
+        userId: followRows[0].User_Id,
+        userName: followRows[0].UserName || 'Staff',
+        deptName: followRows[0].Dept_Name || '',
+        studentId: resolvedStudentId,
+        studentName: resolvedStudentName
+      };
+    }
+
+    if (stuRow && stuRow.To_User_Id && stuRow.To_User_Id > 0) {
+      return {
+        userId: stuRow.To_User_Id,
+        userName: stuRow.To_User_Name || 'Staff',
+        deptName: 'Assigned',
+        studentId: resolvedStudentId,
+        studentName: resolvedStudentName
+      };
+    }
+  } catch (err) {
+    console.warn('[Database] getAssignedUserForStudent error:', err.message);
+  }
+
+  return null;
+}
+
+async function createDocumentUploadNotification({
+  studentId,
+  studentName = '',
+  docName = 'Document',
+  uploadDateTime = '',
+  assignedUser = null,
+  userNotes = ''
+}) {
+  const pool = getPool();
+  if (!pool || !studentId) return null;
+
+  try {
+    let assigned = assignedUser;
+    if (!assigned || !assigned.userId) {
+      assigned = await getAssignedUserForStudent(studentId);
+    }
+
+    if (!assigned || !assigned.userId) {
+      console.warn(`[Notification] No assigned user found for student ID: ${studentId}. Notification skipped.`);
+      return null;
+    }
+
+    const numStudentId = parseInt(String(studentId).replace(/\D/g, ''), 10) || assigned.studentId || 0;
+    const cleanStudentName = String(studentName || assigned.studentName || 'Student').trim().slice(0, 45);
+    const cleanAssignedName = String(assigned.userName || 'Staff').trim().slice(0, 45);
+    const timeStr = uploadDateTime || new Date().toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
+    const message = `A new document has been uploaded for student ${cleanStudentName} (ID: ${numStudentId}). Document: ${docName}. Uploaded on: ${timeStr}.${userNotes ? ` Notes: ${userNotes}` : ''}`;
+
+    const [res] = await pool.query(
+      `INSERT INTO notification (
+        From_User,
+        From_User_Name,
+        To_User,
+        To_User_Name,
+        Status_Id,
+        Status_Name,
+        View_Status,
+        Remark,
+        Entry_Date,
+        Student_Id,
+        Student_Name,
+        DeleteStatus,
+        Read_Status,
+        Entry_Type,
+        Description
+      ) VALUES (?, ?, ?, ?, '0', 'Document Uploaded', 0, ?, NOW(), ?, ?, 0, 0, 4, 'Document Uploaded')`,
+      [
+        numStudentId,
+        cleanStudentName,
+        assigned.userId,
+        cleanAssignedName,
+        message,
+        numStudentId,
+        cleanStudentName
+      ]
+    );
+
+    console.log(`[Notification] Successfully created notification (ID: ${res.insertId}) for assigned user "${cleanAssignedName}" (User_Id: ${assigned.userId}) for student "${cleanStudentName}" (Student_Id: ${numStudentId})`);
+    return {
+      notificationId: res.insertId,
+      toUserId: assigned.userId,
+      toUserName: cleanAssignedName,
+      studentId: numStudentId,
+      studentName: cleanStudentName,
+      docName,
+      message,
+      uploadDateTime: timeStr
+    };
+  } catch (err) {
+    console.warn('[Database] createDocumentUploadNotification error:', err.message);
+    return null;
+  }
+}
+
+async function getUserNotifications(userId, { limit = 50, unreadOnly = false } = {}) {
+  const pool = getPool();
+  if (!pool || !userId) return [];
+  const cleanId = parseInt(String(userId).replace(/\D/g, ''), 10);
+  if (!cleanId) return [];
+
+  try {
+    let query = `
+      SELECT 
+        Notification_Id AS id,
+        From_User AS fromUser,
+        From_User_Name AS fromUserName,
+        To_User AS toUser,
+        To_User_Name AS toUserName,
+        Status_Id AS statusId,
+        Status_Name AS statusName,
+        View_Status AS viewStatus,
+        Remark AS message,
+        Entry_Date AS createdAt,
+        Student_Id AS studentId,
+        Student_Name AS studentName,
+        Read_Status AS readStatus,
+        Entry_Type AS entryType,
+        Description AS description
+      FROM notification
+      WHERE To_User = ? AND (DeleteStatus = 0 OR DeleteStatus IS NULL)
+    `;
+    const params = [cleanId];
+    if (unreadOnly) {
+      query += ' AND (View_Status = 0 OR Read_Status = 0 OR View_Status IS NULL)';
+    }
+    query += ' ORDER BY Notification_Id DESC LIMIT ?';
+    params.push(Math.min(limit || 50, 100));
+
+    const [rows] = await pool.query(query, params);
+    return rows || [];
+  } catch (err) {
+    console.warn('[Database] getUserNotifications error:', err.message);
+    return [];
+  }
+}
+
+async function markNotificationRead(notificationId, userId = null) {
+  const pool = getPool();
+  if (!pool || !notificationId) return false;
+  try {
+    let query = 'UPDATE notification SET View_Status = 1, Read_Status = 1 WHERE Notification_Id = ?';
+    const params = [notificationId];
+    if (userId) {
+      const cleanId = parseInt(String(userId).replace(/\D/g, ''), 10);
+      if (cleanId) {
+        query += ' AND To_User = ?';
+        params.push(cleanId);
+      }
+    }
+    const [res] = await pool.query(query, params);
+    return Boolean(res && (res.affectedRows > 0 || res.changedRows > 0));
+  } catch (err) {
+    console.warn('[Database] markNotificationRead error:', err.message);
+    return false;
+  }
+}
+
+async function markAllNotificationsRead(userId) {
+  const pool = getPool();
+  if (!pool || !userId) return false;
+  const cleanId = parseInt(String(userId).replace(/\D/g, ''), 10);
+  if (!cleanId) return false;
+
+  try {
+    const [res] = await pool.query(
+      'UPDATE notification SET View_Status = 1, Read_Status = 1 WHERE To_User = ? AND (View_Status = 0 OR Read_Status = 0 OR View_Status IS NULL)',
+      [cleanId]
+    );
+    return Boolean(res && (res.affectedRows > 0 || res.changedRows > 0));
+  } catch (err) {
+    console.warn('[Database] markAllNotificationsRead error:', err.message);
+    return false;
+  }
+}
+
 module.exports = {
   getPool,
   initDatabase,
@@ -555,6 +763,13 @@ module.exports = {
   softDeleteStudentDocumentById,
   softDeleteAllStudentDocuments,
   updateStudentDocumentVerificationStatus,
-  updateStudentDocumentStaff
+  updateStudentDocumentStaff,
+
+  // Notification queries
+  getAssignedUserForStudent,
+  createDocumentUploadNotification,
+  getUserNotifications,
+  markNotificationRead,
+  markAllNotificationsRead
 };
 
