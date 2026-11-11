@@ -108,6 +108,32 @@ class AppsScriptClient {
     }
     return null;
   }
+
+  async deleteFile(fileId) {
+    if (!this.appsScriptUrl || !fileId) return false;
+    try {
+      const payload = {
+        action: 'deleteFile',
+        fileId
+      };
+      const res = await fetch(this.appsScriptUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        redirect: 'follow',
+        signal: AbortSignal.timeout(10000)
+      });
+      const text = await res.text();
+      let data = null;
+      try { data = JSON.parse(text); } catch (_) {}
+      if (data && (data.success || !data.error)) {
+        return true;
+      }
+    } catch (err) {
+      console.warn('[AppsScript] deleteFile error:', err.message);
+    }
+    return false;
+  }
 }
 
 // 2. Drive Client (OAuth2 & Service Account)
@@ -476,10 +502,24 @@ class DriveService {
 
   async deleteFile(fileId) {
     if (!fileId) return false;
+
+    // 1. Try Apps Script client first (files uploaded via Apps Script can be deleted by it)
+    if (appsScriptClient.isConfigured() && !fileId.startsWith('local_') && !fileId.startsWith('gdrive_')) {
+      try {
+        const deleted = await appsScriptClient.deleteFile(fileId);
+        if (deleted) {
+          console.log(`[Google Drive via Apps Script] Deleted file from Drive: ${fileId}`);
+          return true;
+        }
+      } catch (_) {}
+    }
+
+    // 2. Fallback to direct Drive API (Service Account / OAuth2)
     if (this.isLiveDriveConfigured() && !fileId.startsWith('local_') && !fileId.startsWith('gdrive_')) {
       try {
         const client = driveClient.getClient();
         await client.files.delete({ fileId, supportsAllDrives: true });
+        console.log(`[Google Drive Direct API] Deleted file: ${fileId}`);
         return true;
       } catch (err) {
         console.warn(`[Google Drive] Delete error for ${fileId}:`, err.message);
