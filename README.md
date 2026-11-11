@@ -80,4 +80,4 @@ npm run frontend
 | Role | Username / Email | Password | Permissions |
 |---|---|---|---|
 | **Employee** | `johndoe` / `john.doe@example.com` | `password123` | Upload, Re-upload, View, Edit, Delete |
-| **Compliance Admin** | `admin` / `admin@example.com` | `adminpassword` | Approve, Reject with remarks, Lock/Unlock |
+| **Compliance Admin** | Dynamic MySQL `user_details` (e.g. `Admin`) | MySQL Password | Approve, Reject with remarks, Lock/Unlock |

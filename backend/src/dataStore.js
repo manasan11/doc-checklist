@@ -74,18 +74,7 @@ function createDefaultDocuments() {
 
 function getInitialData() {
   return {
-    users: [
-      {
-        id: "u-admin",
-        email: process.env.SMTP_USER || "admin@ysquareoverseas.com",
-        username: "admin",
-        name: "Administrator",
-        password: process.env.ADMIN_PASSWORD || "adminpassword",
-        role: "admin",
-        department: "Operations & Compliance",
-        documents: []
-      }
-    ],
+    users: [],
     resetTokens: {}
   };
 }
@@ -212,17 +201,35 @@ class DataStore {
     if (existing) return existing;
 
     try {
+      if (String(userId).startsWith('admin-')) {
+        const staff = await db.findStaffOrAdminUser(String(userId).replace(/^admin-/, ''));
+        if (staff) {
+          const newAdmin = {
+            id: staff.id,
+            email: staff.email || '',
+            username: staff.username || staff.name,
+            name: staff.name,
+            password: staff.password,
+            role: staff.role,
+            department: staff.department,
+            documents: []
+          };
+          this.data.users.push(newAdmin);
+          return newAdmin;
+        }
+      }
+
       const rawId = String(userId).replace(/^u-/, '').trim();
       const s = await db.findUserByIdentifier(rawId);
       if (s) {
         const studentCode = String(s.studentCode || rawId).trim();
         const newUser = {
-          id: `u-${studentCode}`,
+          id: s.id || `u-${studentCode}`,
           email: s.email || '',
           username: s.username || s.email || `student_${studentCode}`,
           name: s.name || `Student ${studentCode}`,
-          password: s.password || 'Password123',
-          role: 'user',
+          password: s.password || '',
+          role: s.role || 'user',
           department: s.department || 'General Operations',
           studentCode: studentCode,
           driveFolderId: null,
@@ -359,57 +366,98 @@ class DataStore {
     if (!identifier || !password) return null;
     const cleanId = String(identifier).trim();
     const cleanLower = cleanId.toLowerCase();
+    const passTrim = String(password).trim();
+    let accountExists = false;
 
-    // 1. Instant check for Admin in memory
-    const adminUser = (this.data.users || []).find(u => 
-      u.role === 'admin' && 
-      ((u.username && u.username.toLowerCase() === cleanLower) || 
-       (u.email && u.email.toLowerCase() === cleanLower))
-    );
-    if (adminUser) {
-      const expectedPass = adminUser.password ? String(adminUser.password).trim() : 'adminpassword';
-      const match = expectedPass === String(password).trim();
-      if (!match) return { error: 'Incorrect password.' };
-      return adminUser;
+    // 1. Check MySQL user_details table (Admin and Staff authentication)
+    try {
+      const staffUser = await db.findStaffOrAdminUser(cleanId);
+      if (staffUser) {
+        accountExists = true;
+        const expectedPass = staffUser.password ? String(staffUser.password).trim() : null;
+        if (expectedPass && expectedPass === passTrim) {
+          let user = this.findUserById(staffUser.id);
+          if (!user) {
+            user = {
+              id: staffUser.id,
+              email: staffUser.email,
+              username: staffUser.username,
+              name: staffUser.name,
+              password: staffUser.password,
+              role: staffUser.role,
+              department: staffUser.department,
+              documents: []
+            };
+            this.data.users.push(user);
+          } else {
+            user.password = staffUser.password;
+            user.role = staffUser.role;
+          }
+          return user;
+        }
+      }
+    } catch (err) {
+      console.warn('[DataStore] Notice querying user_details for login:', err.message);
     }
 
-    // 2. Query MySQL student table
+    // 2. Optional Environment Admin fallback (only if BOTH ADMIN_USERNAME and ADMIN_PASSWORD are explicitly configured)
+    if (process.env.ADMIN_USERNAME && process.env.ADMIN_PASSWORD) {
+      const envAdmin = process.env.ADMIN_USERNAME.trim().toLowerCase();
+      if (cleanLower === envAdmin) {
+        accountExists = true;
+        if (passTrim === process.env.ADMIN_PASSWORD.trim()) {
+          let user = this.findUserById('u-admin');
+          if (!user) {
+            user = {
+              id: 'u-admin',
+              email: process.env.SMTP_USER || '',
+              username: process.env.ADMIN_USERNAME,
+              name: 'Administrator',
+              password: process.env.ADMIN_PASSWORD,
+              role: 'admin',
+              department: 'Operations & Compliance',
+              documents: []
+            };
+            this.data.users.push(user);
+          }
+          return user;
+        }
+      }
+    }
+
+    // 3. Query MySQL student table
     try {
       const stu = await db.findUserByIdentifier(cleanId);
       if (stu) {
-        const localUser = this.findUserById(stu.id) || this.findUserByEmailOrUsername(cleanLower);
-        let expectedPass = null;
-        if (stu.password && String(stu.password).trim()) {
-          expectedPass = String(stu.password).trim();
-        } else if (localUser && localUser.password && String(localUser.password).trim()) {
-          expectedPass = String(localUser.password).trim();
-        } else {
-          expectedPass = 'Password123';
+        accountExists = true;
+        const expectedPass = stu.password ? String(stu.password).trim() : null;
+        if (expectedPass && expectedPass === passTrim) {
+          const user = await this.findOrLoadUser(stu.id);
+          if (user) {
+            user.password = expectedPass;
+          }
+          return user || stu;
         }
-
-        const match = expectedPass === String(password).trim();
-        if (!match) return { error: 'Incorrect password.' };
-        const user = await this.findOrLoadUser(stu.id);
-        if (user) {
-          user.password = expectedPass;
-        }
-        return user || stu;
       }
     } catch (err) {
-      console.warn('[DataStore] Notice querying MySQL for login:', err.message);
+      console.warn('[DataStore] Notice querying MySQL for student login:', err.message);
     }
 
-    // 3. Fallback to memory
+    // 4. Memory check for existing cached user
     this.data = this.load();
     const user = this.findUserByEmailOrUsername(cleanLower);
-    if (!user) {
-      return { error: 'Account not found. Only registered users in the database can log in.' };
+    if (user) {
+      accountExists = true;
+      if (user.password && String(user.password).trim() === passTrim) {
+        return user;
+      }
     }
 
-    const match = user.password === String(password).trim();
-    if (!match) return { error: 'Incorrect password.' };
+    if (accountExists) {
+      return { error: 'Incorrect password.' };
+    }
 
-    return user;
+    return { error: 'Account not found. Only registered users in the database can log in.' };
   }
 
   ensureStudentCode(user) {

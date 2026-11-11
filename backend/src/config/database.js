@@ -42,13 +42,61 @@ function isDbConnected() {
   return isConnected;
 }
 
-async function findUserByIdentifier(identifier) {
+async function findStaffOrAdminUser(identifier) {
   if (!identifier) return null;
   const pool = getPool();
   if (!pool) return null;
   const clean = String(identifier).trim();
+  const cleanLower = clean.toLowerCase();
+
+  try {
+    const isEmail = clean.includes('@');
+    let query = '';
+    let params = [];
+    if (isEmail) {
+      query = 'SELECT * FROM user_details WHERE LOWER(TRIM(Email)) = ? AND (DeleteStatus = 0 OR DeleteStatus IS NULL) AND (Working_Status = 1 OR Working_Status = "1") LIMIT 1';
+      params = [cleanLower];
+    } else {
+      const isNum = /^\d+$/.test(clean);
+      if (isNum) {
+        query = 'SELECT * FROM user_details WHERE (LOWER(TRIM(User_Details_Name)) = ? OR LOWER(TRIM(Email)) = ? OR Employee_Id = ?) AND (DeleteStatus = 0 OR DeleteStatus IS NULL) AND (Working_Status = 1 OR Working_Status = "1") LIMIT 1';
+        params = [cleanLower, cleanLower, parseInt(clean, 10)];
+      } else {
+        query = 'SELECT * FROM user_details WHERE (LOWER(TRIM(User_Details_Name)) = ? OR LOWER(TRIM(Email)) = ?) AND (DeleteStatus = 0 OR DeleteStatus IS NULL) AND (Working_Status = 1 OR Working_Status = "1") LIMIT 1';
+        params = [cleanLower, cleanLower];
+      }
+    }
+    const [rows] = await pool.query(query, params);
+    if (rows && rows.length > 0) {
+      const u = rows[0];
+      const dept = (u.Department_Name || '').toLowerCase();
+      const role = (dept.includes('admin') || (u.User_Details_Name || '').toLowerCase() === 'admin') ? 'admin' : 'staff';
+      return {
+        id: `admin-${u.User_Details_Id}`,
+        name: u.User_Details_Name || 'Administrator',
+        email: u.Email || '',
+        username: u.User_Details_Name || u.Email,
+        password: u.Password,
+        role: role,
+        department: u.Department_Name || 'Operations & Compliance',
+        userDetailsId: u.User_Details_Id
+      };
+    }
+  } catch (err) {
+    console.warn('[Database] findStaffOrAdminUser notice:', err.message);
+  }
+  return null;
+}
+
+async function findUserByIdentifier(identifier) {
+  if (!identifier) return null;
+  const pool = getPool();
+  if (!pool) return null;
+
+  const clean = String(identifier).trim();
   const isEmail = clean.includes('@');
-  const numPart = isEmail ? '' : clean.replace(/\D/g, '');
+  const prefixMatch = !isEmail ? clean.match(/^(?:u-|stu|student[-_]?)(\d+)$/i) : null;
+  const numPart = prefixMatch ? prefixMatch[1] : null;
 
   try {
     let query = '';
@@ -57,11 +105,17 @@ async function findUserByIdentifier(identifier) {
       query = 'SELECT * FROM student WHERE LOWER(TRIM(Email)) = LOWER(TRIM(?)) AND (DeleteStatus = 0 OR DeleteStatus IS NULL) LIMIT 1';
       params = [clean];
     } else {
-      query = 'SELECT * FROM student WHERE (Username = ? OR Student_Name = ? OR Student_Id = ? OR Unique_Id = ?';
-      params = [clean, clean, clean, clean];
-      if (numPart && numPart !== clean) {
-        query += ' OR Student_Id = ? OR Unique_Id = ?';
-        params.push(numPart, numPart);
+      query = 'SELECT * FROM student WHERE (Username = ? OR Student_Name = ?';
+      params = [clean, clean];
+      if (/^\d+$/.test(clean)) {
+        query += ' OR Student_Id = ?';
+        params.push(parseInt(clean, 10));
+      }
+      query += ' OR Unique_Id = ?';
+      params.push(clean);
+      if (numPart && numPart !== clean && /^\d+$/.test(numPart)) {
+        query += ' OR Student_Id = ?';
+        params.push(parseInt(numPart, 10));
       }
       query += ') AND (DeleteStatus = 0 OR DeleteStatus IS NULL) LIMIT 1';
     }
@@ -81,6 +135,10 @@ async function findUserByIdentifier(identifier) {
         studentCode
       };
     }
+
+    // Fallback check user_details if not in student table
+    const staff = await findStaffOrAdminUser(identifier);
+    if (staff) return staff;
   } catch (err) {
     console.warn('[Database] findUserByIdentifier error:', err.message);
   }
@@ -95,6 +153,18 @@ async function updateUserPassword(studentCode, email, username, newPassword) {
   const cleanCode = studentCode ? String(studentCode).replace(/^u-/, '').trim() : null;
   const numPart = cleanCode ? cleanCode.replace(/\D/g, '') : null;
 
+  // 1. Direct admin/staff ID check (admin-151)
+  if (cleanCode && cleanCode.startsWith('admin-')) {
+    const adminId = cleanCode.replace(/^admin-/, '').trim();
+    try {
+      const [admRes] = await pool.query('UPDATE user_details SET Password = ? WHERE User_Details_Id = ?', [newPassword, adminId]);
+      if (admRes && (admRes.affectedRows > 0 || admRes.changedRows > 0)) return true;
+    } catch (e) {
+      console.warn('[Database] update admin password error:', e.message);
+    }
+  }
+
+  // 2. Update in student table
   let updated = false;
   try {
     const [stuRes] = await pool.query(
@@ -114,6 +184,22 @@ async function updateUserPassword(studentCode, email, username, newPassword) {
   } catch (err) {
     console.warn('[Database] updateUserPassword error:', err.message);
   }
+
+  // 3. If not updated in student table, check user_details by email / name
+  if (!updated && (cleanEmail || cleanUsername)) {
+    try {
+      const [admRes] = await pool.query(
+        `UPDATE user_details SET Password = ? 
+         WHERE (LOWER(TRIM(Email)) = ? AND Email IS NOT NULL AND Email != "") 
+            OR (LOWER(TRIM(User_Details_Name)) = ? AND User_Details_Name IS NOT NULL AND User_Details_Name != "")`,
+        [newPassword, cleanEmail, cleanUsername || cleanEmail]
+      );
+      updated = Boolean(admRes && (admRes.affectedRows > 0 || admRes.changedRows > 0));
+    } catch (err) {
+      console.warn('[Database] updateUserPassword (user_details) error:', err.message);
+    }
+  }
+
   return updated;
 }
 
@@ -450,6 +536,7 @@ module.exports = {
 
   // Auth queries
   findUserByIdentifier,
+  findStaffOrAdminUser,
   updateUserPassword,
 
   // Student queries
