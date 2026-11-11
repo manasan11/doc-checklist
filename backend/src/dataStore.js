@@ -304,8 +304,8 @@ class DataStore {
     if (!user) return [];
 
     const strId = String(userId || '');
-    const studentCode = user.studentCode || (strId.includes('STU') ? strId.replace(/^u-/, '') : `STU${String(strId.replace(/\D/g, '') || 1).padStart(3, '0')}`);
-    const legacyNumId = parseInt(strId.replace(/\D/g, ''), 10) || null;
+    const studentCode = user.studentCode || strId.replace(/^u-/, '').trim();
+    const legacyNumId = /^\d+$/.test(studentCode) ? parseInt(studentCode, 10) : null;
 
     try {
       const templates = await this.getMasterDocTemplates();
@@ -461,11 +461,9 @@ class DataStore {
   }
 
   ensureStudentCode(user) {
-    if (!user) return 'STU001';
+    if (!user) return '';
     if (!user.studentCode) {
-      user.studentCode = user.id && String(user.id).includes('STU')
-        ? String(user.id).replace(/^u-/, '')
-        : `STU${String((user.id || '').replace(/\D/g, '') || 1).padStart(3, '0')}`;
+      user.studentCode = user.id ? String(user.id).replace(/^u-/, '').trim() : '';
     }
     return user.studentCode;
   }
@@ -476,7 +474,7 @@ class DataStore {
       .replace(/[^a-zA-Z0-9_\- ]/g, '')
       .trim()
       .replace(/\s+/g, '_');
-    return `${code}_${cleanName}`;
+    return code ? `${code}_${cleanName}` : cleanName;
   }
 
   setUserDriveFolder(userId, folderId, folderName) {
@@ -754,7 +752,7 @@ class DataStore {
     try {
       const user = this.findUserById(userId);
       const strId = String(userId || '');
-      const studentCode = user?.studentCode || (strId.includes('STU') ? strId.replace(/^u-/, '') : `STU${String(strId.replace(/\D/g, '') || 1).padStart(3, '0')}`);
+      const studentCode = user?.studentCode || strId.replace(/^u-/, '').trim();
       const directDriveLink = toGoogleDriveViewUrl(fileResult.driveWebViewLink || fileResult.webViewLink, fileResult.driveFileId);
 
       if (!this.knownMasterDocIds || !this.knownMasterDocIds.has(doc.id)) {
@@ -814,8 +812,8 @@ class DataStore {
     if (!user) throw new Error("User not found");
 
     const strId = String(userId || '');
-    const studentCode = user.studentCode || (strId.includes('STU') ? strId.replace(/^u-/, '') : `STU${String(strId.replace(/\D/g, '') || 1).padStart(3, '0')}`);
-    const legacyNumId = parseInt(strId.replace(/\D/g, ''), 10) || null;
+    const studentCode = user.studentCode || strId.replace(/^u-/, '').trim();
+    const legacyNumId = /^\d+$/.test(studentCode) ? parseInt(studentCode, 10) : null;
 
     const docIndex = (user.documents || []).findIndex(d => d.id === numericDocId);
     if (docIndex === -1) throw new Error("Document not found");
