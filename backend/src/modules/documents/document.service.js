@@ -1059,6 +1059,20 @@ async function processDocumentUpload({ rawDocId, targetUserId, userNotes, reques
     effectiveDocType
   );
 
+  // Trigger notification to the assigned staff member after successful database save
+  try {
+    const notificationService = require('../notifications/notification.service');
+    const studentCode = user.studentCode || String(targetUserId).replace(/^u-/, '').trim();
+    await notificationService.notifyAssignedUserOnDocumentUpload({
+      studentId: studentCode,
+      studentName: user.name || 'Student',
+      docName: updatedDoc?.name || effectiveDocType,
+      uploadDateTime: updatedDoc?.uploadDateTime || new Date()
+    });
+  } catch (notifErr) {
+    console.warn('[Notification Notice]:', notifErr.message);
+  }
+
   return {
     success: true,
     message: `Document "${effectiveDocType}" uploaded successfully.`,

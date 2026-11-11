@@ -3,9 +3,10 @@ export interface User {
   name: string;
   email: string;
   username: string;
-  role: 'user' | 'admin';
+  role: 'user' | 'admin' | 'staff' | string;
   studentCode?: string;
   department?: string;
+  userDetailsId?: number;
 }
 
 export interface StudentUser {

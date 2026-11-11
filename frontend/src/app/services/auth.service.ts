@@ -22,6 +22,8 @@ export class AuthService {
   token = signal<string | null>(this.getStoredToken());
   isAuthenticated = computed(() => !!this.currentUser());
   isAdmin = computed(() => this.currentUser()?.role === 'admin');
+  isStaff = computed(() => this.currentUser()?.role === 'staff');
+  isStaffOrAdmin = computed(() => this.currentUser()?.role === 'admin' || this.currentUser()?.role === 'staff');
 
   constructor() {
     // Purge any legacy shared localStorage sessions to eliminate cross-tab bleed

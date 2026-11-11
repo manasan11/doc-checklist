@@ -5,6 +5,7 @@ const authRoutes = require('./modules/auth/auth.routes');
 const studentRoutes = require('./modules/students/student.routes');
 const documentRoutes = require('./modules/documents/document.routes');
 const driveRoutes = require('./modules/drive/drive.routes');
+const notificationRoutes = require('./modules/notifications/notification.routes');
 const documentController = require('./modules/documents/document.controller');
 const { authenticateToken } = require('./middlewares/auth.middleware');
 const { errorHandler, notFoundHandler } = require('./middlewares/error.middleware');
@@ -20,6 +21,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/students', studentRoutes);
 app.use('/api/documents', documentRoutes);
 app.use('/api/drive', driveRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 // Direct Student Document routes
 app.get('/api/students/:studentId/documents', authenticateToken, documentController.getStudentFollowupDocuments);
