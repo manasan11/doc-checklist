@@ -24,3 +24,4 @@ export interface UnreadCountResponse {
   success: boolean;
   unreadCount: number;
 }
+

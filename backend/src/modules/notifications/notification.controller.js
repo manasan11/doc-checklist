@@ -63,3 +63,4 @@ module.exports = {
   markAsRead,
   markAllAsRead
 };
+
