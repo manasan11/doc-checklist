@@ -40,23 +40,46 @@ async function ensureMasterDocument(docId, docName, docTypeId = 1) {
   }
 }
 
-async function getFollowupUserByStudentAndDept(studentId, deptId = 437) {
+async function getFollowupUserByStudentAndDept(studentId, deptId = null) {
   if (!studentId) return null;
   const numStudentId = parseInt(String(studentId).replace(/\D/g, ''), 10);
   if (!numStudentId) return null;
   try {
-    const [rows] = await db.query(
-      `SELECT User_Id, UserName 
-       FROM student_followup 
-       WHERE Student_Id = ? 
-         AND Department = ? 
-         AND DeleteStatus = 0 
-         AND User_Id IS NOT NULL 
-       ORDER BY Entry_date DESC, Student_FollowUp_Id DESC 
+    let query = `
+      SELECT sf.User_Id, sf.UserName 
+      FROM student_followup sf 
+      WHERE sf.Student_Id = ? 
+    `;
+    const params = [numStudentId];
+
+    if (deptId) {
+      query += ` AND (sf.Department = ? OR LOWER(TRIM(sf.Dept_Name)) = LOWER(TRIM(?)))`;
+      params.push(deptId, String(deptId));
+    } else {
+      query += ` AND (
+        sf.Department IN (
+          SELECT Department_Id FROM department WHERE LOWER(TRIM(Department_Name)) = 'documentation'
+        )
+        OR LOWER(TRIM(sf.Dept_Name)) = 'documentation'
+      )`;
+    }
+
+    query += ` AND (sf.DeleteStatus = 0 OR sf.DeleteStatus IS NULL) AND sf.User_Id IS NOT NULL AND sf.User_Id > 0 ORDER BY sf.Entry_date DESC, sf.Student_FollowUp_Id DESC LIMIT 1`;
+
+    const [rows] = await db.query(query, params);
+    if (rows && rows.length > 0 && rows[0].User_Id) return rows[0];
+
+    // 2. Fallback: current To_User from student table
+    const [stuRows] = await db.query(
+      `SELECT To_User_Id AS User_Id, To_User_Name AS UserName 
+       FROM student 
+       WHERE Student_Id = ? AND To_User_Id IS NOT NULL AND To_User_Id > 0 
        LIMIT 1`,
-      [numStudentId, Number(deptId) || 437]
+      [numStudentId]
     );
-    return rows && rows.length > 0 ? rows[0] : null;
+    if (stuRows && stuRows.length > 0 && stuRows[0].User_Id) return stuRows[0];
+
+    return null;
   } catch (err) {
     console.warn('[DocumentService] getFollowupUserByStudentAndDept error:', err.message);
     return null;
@@ -522,7 +545,7 @@ async function syncSingleUploadToMysql(userId, doc, fileResult, userNotes = "") 
     if (studentCode) {
       let assignedStaff = null;
       try {
-        const followup = await getFollowupUserByStudentAndDept(studentCode, 437);
+        const followup = await getFollowupUserByStudentAndDept(studentCode);
         if (followup && followup.User_Id) assignedStaff = followup.User_Id;
       } catch (_) {}
       if (!assignedStaff && user?.assignedStaff) {

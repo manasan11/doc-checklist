@@ -7,23 +7,48 @@ async function getAssignedUserForStudent(studentIdentifier) {
   if (!numStudentId) return null;
 
   try {
+    // 1. Primary: user in student_followup for documentation department (dynamically resolved from department table / Dept_Name)
     const [rows] = await db.query(
-      `SELECT User_Id, UserName 
-       FROM student_followup 
-       WHERE Student_Id = ? 
-         AND Department = 437 
-         AND DeleteStatus = 0 
-         AND User_Id IS NOT NULL 
-       ORDER BY Entry_date DESC, Student_FollowUp_Id DESC 
+      `SELECT sf.User_Id, sf.UserName 
+       FROM student_followup sf 
+       WHERE sf.Student_Id = ? 
+         AND (
+           sf.Department IN (
+             SELECT Department_Id FROM department WHERE LOWER(TRIM(Department_Name)) = 'documentation'
+           )
+           OR LOWER(TRIM(sf.Dept_Name)) = 'documentation'
+         )
+         AND (sf.DeleteStatus = 0 OR sf.DeleteStatus IS NULL) 
+         AND sf.User_Id IS NOT NULL 
+         AND sf.User_Id > 0
+       ORDER BY sf.Entry_date DESC, sf.Student_FollowUp_Id DESC 
        LIMIT 1`,
       [numStudentId]
     );
 
-    if (rows && rows.length > 0) {
+    if (rows && rows.length > 0 && rows[0].User_Id) {
       return {
         userId: rows[0].User_Id,
         userName: rows[0].UserName,
         studentId: numStudentId
+      };
+    }
+
+    // 2. Fallback: if student not in followup document, send notification to current To_User from student table
+    const [stuRows] = await db.query(
+      `SELECT To_User_Id, To_User_Name, Student_Name 
+       FROM student 
+       WHERE Student_Id = ? AND To_User_Id IS NOT NULL AND To_User_Id > 0 
+       LIMIT 1`,
+      [numStudentId]
+    );
+
+    if (stuRows && stuRows.length > 0 && stuRows[0].To_User_Id) {
+      return {
+        userId: stuRows[0].To_User_Id,
+        userName: stuRows[0].To_User_Name,
+        studentId: numStudentId,
+        studentName: stuRows[0].Student_Name
       };
     }
   } catch (err) {
