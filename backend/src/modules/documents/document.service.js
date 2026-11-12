@@ -40,20 +40,22 @@ async function ensureMasterDocument(docId, docName, docTypeId = 1) {
   }
 }
 
-async function getFollowupUserByStudentAndDept(studentId, deptId = null) {
+async function getFollowupUserByStudentAndDept(studentId, deptId = 437) {
   if (!studentId) return null;
-  const cleanStudent = String(studentId).replace(/^u-/, '').trim();
-  const cleanDept = deptId ? String(deptId).trim() : null;
+  const numStudentId = parseInt(String(studentId).replace(/\D/g, ''), 10);
+  if (!numStudentId) return null;
   try {
-    let query = 'SELECT Student_FollowUp_Id, Student_Id, Department, Dept_Name, User_Id, UserName, Entry_date FROM student_followup WHERE Student_Id = ?';
-    const params = [cleanStudent];
-    if (cleanDept) {
-      query += ' AND (Department = ? OR Dept_Name = ?)';
-      params.push(cleanDept, cleanDept);
-    }
-    query += ' AND (DeleteStatus = 0 OR DeleteStatus IS NULL) ORDER BY Entry_date DESC, Student_FollowUp_Id DESC LIMIT 1';
-
-    const [rows] = await db.query(query, params);
+    const [rows] = await db.query(
+      `SELECT User_Id, UserName 
+       FROM student_followup 
+       WHERE Student_Id = ? 
+         AND Department = ? 
+         AND DeleteStatus = 0 
+         AND User_Id IS NOT NULL 
+       ORDER BY Entry_date DESC, Student_FollowUp_Id DESC 
+       LIMIT 1`,
+      [numStudentId, Number(deptId) || 437]
+    );
     return rows && rows.length > 0 ? rows[0] : null;
   } catch (err) {
     console.warn('[DocumentService] getFollowupUserByStudentAndDept error:', err.message);
@@ -518,12 +520,13 @@ async function syncSingleUploadToMysql(userId, doc, fileResult, userNotes = "") 
     }
 
     if (studentCode) {
-      let assignedStaff = user?.assignedStaff || null;
-      if (!assignedStaff) {
-        try {
-          const followup = await getFollowupUserByStudentAndDept(studentCode, null);
-          if (followup && followup.User_Id) assignedStaff = followup.User_Id;
-        } catch (_) {}
+      let assignedStaff = null;
+      try {
+        const followup = await getFollowupUserByStudentAndDept(studentCode, 437);
+        if (followup && followup.User_Id) assignedStaff = followup.User_Id;
+      } catch (_) {}
+      if (!assignedStaff && user?.assignedStaff) {
+        assignedStaff = user.assignedStaff;
       }
 
       const fileName = fileResult?.fileName || doc?.fileName || doc?.name || 'Document';

@@ -53,7 +53,6 @@ function getBackendUrl(path: string): string {
       <section class="checklist-section glass-panel">
         <div class="checklist-header">
           <div class="checklist-title-container">
-            <img src="favicon.ico" alt="Ysquare" class="checklist-logo" />
             <div>
               <h2 class="checklist-title">Document Checklist</h2>
               @if (selectedStudent()) {

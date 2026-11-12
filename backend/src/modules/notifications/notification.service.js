@@ -3,46 +3,27 @@ const db = require('../../config/database');
 async function getAssignedUserForStudent(studentIdentifier) {
   if (!studentIdentifier) return null;
   const clean = String(studentIdentifier).replace(/^u-/, '').trim();
-  const numId = /^\d+$/.test(clean) ? parseInt(clean, 10) : null;
-  let resolvedStudentId = numId;
-  let resolvedStudentName = '';
+  const numStudentId = parseInt(clean, 10);
+  if (!numStudentId) return null;
 
   try {
-    const [stuRows] = await db.query(
-      'SELECT Student_Id, Student_Name, To_User_Id, To_User_Name FROM student WHERE (Student_Id = ? AND ? IS NOT NULL) OR Unique_Id = ? OR Email = ? LIMIT 1',
-      [numId, numId, clean, clean]
+    const [rows] = await db.query(
+      `SELECT User_Id, UserName 
+       FROM student_followup 
+       WHERE Student_Id = ? 
+         AND Department = 437 
+         AND DeleteStatus = 0 
+         AND User_Id IS NOT NULL 
+       ORDER BY Entry_date DESC, Student_FollowUp_Id DESC 
+       LIMIT 1`,
+      [numStudentId]
     );
 
-    const stuRow = stuRows && stuRows.length > 0 ? stuRows[0] : null;
-    if (stuRow) {
-      resolvedStudentId = stuRow.Student_Id;
-      resolvedStudentName = stuRow.Student_Name || '';
-    }
-
-    if (!resolvedStudentId) return null;
-
-    const [followRows] = await db.query(
-      'SELECT sf.Student_FollowUp_Id, sf.Student_Id, sf.User_Id, COALESCE(ud.User_Details_Name, sf.UserName) AS UserName, sf.Dept_Name FROM student_followup sf LEFT JOIN user_details ud ON sf.User_Id = ud.User_Details_Id WHERE sf.Student_Id = ? AND (sf.DeleteStatus = 0 OR sf.DeleteStatus IS NULL) AND sf.User_Id IS NOT NULL AND sf.User_Id > 0 ORDER BY sf.Student_FollowUp_Id DESC LIMIT 1',
-      [resolvedStudentId]
-    );
-
-    if (followRows && followRows.length > 0) {
+    if (rows && rows.length > 0) {
       return {
-        userId: followRows[0].User_Id,
-        userName: followRows[0].UserName || 'Staff',
-        deptName: followRows[0].Dept_Name || '',
-        studentId: resolvedStudentId,
-        studentName: resolvedStudentName
-      };
-    }
-
-    if (stuRow && stuRow.To_User_Id && stuRow.To_User_Id > 0) {
-      return {
-        userId: stuRow.To_User_Id,
-        userName: stuRow.To_User_Name || 'Staff',
-        deptName: 'Assigned',
-        studentId: resolvedStudentId,
-        studentName: resolvedStudentName
+        userId: rows[0].User_Id,
+        userName: rows[0].UserName,
+        studentId: numStudentId
       };
     }
   } catch (err) {
